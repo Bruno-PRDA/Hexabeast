@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!-- Top-level robot description. Two halves:
+       hexapod_body.urdf.xacro   links and joints. Generated placeholder now;
+                                 the SolidWorks export replaces it.
+       hexapod_control.xacro     ros2_control, Gazebo plugin, sensors, friction.
+     Both are produced by tools/gen_urdf.py; regenerate after editing
+     robot_config.py. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="hexapod">
+  <xacro:include filename="$(find hexapod_description)/urdf/hexapod_body.urdf.xacro"/>
+  <xacro:include filename="$(find hexapod_description)/urdf/hexapod_control.xacro"/>
+</robot>

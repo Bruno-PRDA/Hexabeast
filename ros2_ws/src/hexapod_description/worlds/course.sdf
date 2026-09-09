@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<!-- Test course: flat floor, a 12 mm kerb at x = 0.9, and a hill from x = 1.4
+     (5 degree ramp up, flat top, 5 degree ramp down). Frames: X forward, Z up. -->
+<sdf version="1.9">
+  <world name="course">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.3 -0.9</direction>
+    </light>
+
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <material><ambient>0.30 0.31 0.33 1</ambient><diffuse>0.30 0.31 0.33 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 12 mm kerb: under the 35 mm foot lift, enough to tilt the body. -->
+    <model name="kerb">
+      <static>true</static>
+      <pose>0.9 0 0.006 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.3 0.6 0.012</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface></collision>
+        <visual name="visual"><geometry><box><size>0.3 0.6 0.012</size></box></geometry>
+          <material><ambient>0.52 0.48 0.40 1</ambient><diffuse>0.52 0.48 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- Hill: 0.8 m ramps at 5 deg (rise 0.0697, run 0.7970) with a 0.4 m top.
+         Pitch is negative for a ramp rising toward +X. -->
+    <model name="ramp_up">
+      <static>true</static>
+      <pose>1.7985 0 0.02486 0 -0.08727 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.8 0.6 0.02</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface></collision>
+        <visual name="visual"><geometry><box><size>0.8 0.6 0.02</size></box></geometry>
+          <material><ambient>0.52 0.48 0.40 1</ambient><diffuse>0.52 0.48 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="hill_top">
+      <static>true</static>
+      <pose>2.3970 0 0.05972 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.4 0.6 0.02</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface></collision>
+        <visual name="visual"><geometry><box><size>0.4 0.6 0.02</size></box></geometry>
+          <material><ambient>0.52 0.48 0.40 1</ambient><diffuse>0.52 0.48 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="ramp_down">
+      <static>true</static>
+      <pose>2.9955 0 0.02486 0 0.08727 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.8 0.6 0.02</size></box></geometry>
+          <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction></surface></collision>
+        <visual name="visual"><geometry><box><size>0.8 0.6 0.02</size></box></geometry>
+          <material><ambient>0.52 0.48 0.40 1</ambient><diffuse>0.52 0.48 0.40 1</diffuse></material></visual>
+      </link>
+    </model>
+  </world>
+</sdf>

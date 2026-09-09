@@ -16,3 +16,8 @@ __pycache__/
 # OS
 Thumbs.db
 .DS_Store
+
+# ROS 2 workspace (build inside WSL, sources only in git)
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
