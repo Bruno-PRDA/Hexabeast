@@ -1,0 +1,7 @@
+# Godot writes LF and the addon ships LF; keep the repo LF so diffs stay about code.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.wav binary
+*.ogg binary
+*.glb binary

@@ -1,0 +1,18 @@
+# Godot
+sim/godot/.godot/
+sim/godot/*.import
+sim/godot/export_presets.cfg
+sim/godot/.editorconfig
+
+# PlatformIO
+firmware/.pio/
+firmware/.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+Thumbs.db
+.DS_Store
