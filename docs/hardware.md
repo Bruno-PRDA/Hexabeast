@@ -35,6 +35,26 @@ Put a 1000 uF+ electrolytic across V+/GND on each board to absorb the
 current spikes when all six legs move at once. Common the ESP32 ground with
 the servo ground.
 
+## Servo torque - what the simulation found
+
+With the geometry in `robot_config.gd` and a 1.32 kg all-up mass, the physics
+sim measured the peak torque any servo has to supply:
+
+| standing | walking 0.1 m/s | 12 mm kerb | turning 1 rad/s | climbing 5 deg |
+|----------|-----------------|------------|-----------------|----------------|
+| 0.25 N.m | 0.39 N.m | 0.46 N.m | 0.78 N.m | 0.83 N.m |
+
+An MG996R (0.9 N.m at ~5 V, 1.1 at 6 V) walks with a 2.3x margin and turns
+or climbs with almost none. Two consequences:
+
+- **Run the servos at 6 V**, not 5. The extra 20% torque is free.
+- **Weigh the real robot.** The margin scales with mass. Over ~1.5 kg, or if
+  you want brisk turning, use 20 kg.cm servos (DS3218 class, ~2 N.m) - and a
+  supply that can feed them (see Power).
+
+Change `SERVO_TORQUE`, `SERVO_SPEED` and the masses to your parts and re-run;
+the HUD's torque line and stall warnings do the rest.
+
 ## Sensors
 
 | Sensor | Bus / pins | Notes |

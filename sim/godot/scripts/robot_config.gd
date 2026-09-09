@@ -39,6 +39,50 @@ const JOINT_CENTER_DEG := Vector3(0.0, 22.0, -94.0)
 # last few degrees are unreliable under load, so leave margin.
 const JOINT_TRAVEL_DEG := 80.0
 
+# --- Servo model (phase 1 physics) --------------------------------------
+# From the outside a hobby servo is a stiff position spring with a torque cap
+# and a speed cap. The figures are MG996R class at 6 V - swap in your servo's
+# datasheet numbers. Torque is the one that matters: if the sim can't stand,
+# neither will the robot.
+const SERVO_TORQUE := 0.90      # N.m   (9.4 kg.cm)
+const SERVO_SPEED := 6.0        # rad/s (0.17 s per 60 deg, no load)
+# Stiffness: a hobby servo gives up roughly 4 degrees at rated load (deadband
+# plus gear backlash plus compliance), i.e. ~0.9 N.m / 0.07 rad. Stiffer than
+# this and the three planted legs fight each other hard enough to stall.
+const SERVO_STIFFNESS := 12.5   # N.m/rad
+
+# Damping is not a free parameter. A servo's torque falls linearly from stall
+# at zero speed to nothing at its free speed, and that line IS a damping
+# coefficient: T_stall / w_free. Guessing it high is the classic mistake - at
+# 0.5 N.m.s/rad the swing legs spent the whole servo rating fighting their own
+# damping and never left the ground.
+const SERVO_DAMPING := SERVO_TORQUE / SERVO_SPEED   # 0.15 N.m.s/rad
+
+# A geared servo's output shaft carries the motor rotor's inertia multiplied by
+# the gear ratio squared, and that swamps the inertia of the plastic link it
+# drives. It is what makes a real servo feel "heavy" to back-drive, and it is
+# also what keeps the physics solver honest: a stiff spring on a near-massless
+# link is a hundreds-of-hertz mode no 120 Hz step can resolve.
+const SERVO_REFLECTED_INERTIA := 5.0e-4   # kg.m^2, applied to every link
+
+# --- Masses (kg) ----------------------------------------------------------
+# Guesses for an MG996R build. The body figure includes the ESP32, both driver
+# boards and a 2S battery. Weigh the real parts and correct these - the
+# torque margin depends on them directly.
+const MASS_BODY := 0.45
+const MASS_COXA := 0.06     # essentially one servo
+const MASS_FEMUR := 0.065   # servo plus bracket
+const MASS_TIBIA := 0.02
+
+# Rubber foot on a hard floor. Lower friction lets a foot micro-slip and
+# relieve the internal forces the gait builds up; higher pins the foot and
+# hands those forces to the servos instead.
+const FOOT_FRICTION := 0.8
+
+# Height the body spawns at. The rig is built in the servo-centre pose, whose
+# feet sit 63 mm below the body, so start just above that and let it settle.
+const SPAWN_HEIGHT := 0.066
+
 ## Leg layout, front to back.
 ##
 ## `yaw` is the direction the leg points away from the body, as a rotation

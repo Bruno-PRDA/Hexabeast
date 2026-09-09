@@ -42,6 +42,15 @@ static func foot_offset(neutral: Vector3, vel: Vector3, yaw_rate: float, phase: 
 	return amp.lerp(-amp, smoothstep(0.0, 1.0, u)) + Vector3.UP * lift * sin(PI * u)
 
 
+## Progress through stance, 0..1, or -1 while the leg is in swing.
+## Contact checks should ignore the first and last stretch of stance - the
+## foot is still arriving or already leaving, and a switch reading nothing
+## there is timing, not a stumble.
+static func stance_progress(phase: float, group: int) -> float:
+	var local := fposmod(phase + (0.5 if group == 1 else 0.0), 1.0)
+	return local / 0.5 if local < 0.5 else -1.0
+
+
 ## True when this leg is in stance (foot loaded) at the given phase.
 ## The real robot cross-checks this against its foot contact switches - a leg
 ## that should be planted but reads no contact means the robot is falling or
