@@ -1,4 +1,4 @@
-# Octobeast
+#Hexabeast
 
 An 18-servo hexapod on an ESP32: designed in SolidWorks, simulated in Gazebo,
 driven by ROS 2.
