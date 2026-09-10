@@ -5,3 +5,10 @@
 *.wav binary
 *.ogg binary
 *.glb binary
+
+# CAD is binary - never line-ending normalise it. STEP is genuinely text.
+*.stl binary
+*.SLDPRT binary
+*.SLDASM binary
+*.SLDDRW binary
+*.step text

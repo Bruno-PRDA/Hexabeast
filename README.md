@@ -41,6 +41,7 @@ docs/
   solidworks-export.md   naming and axis conventions for the sw2urdf export
   hardware.md            wiring, power, camera/FPV link, servo calibration, torque
   bom.md                 electronics bill of materials with addresses and gotchas
+  cad-measurements.md    the CAD leg measured, and why it exceeds the DT996 budget
 sim/godot/               ARCHIVED Phase 0/1 Godot simulation. Its findings are kept below
                          and in hardware.md; it is not developed further.
 ```
