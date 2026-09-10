@@ -12,6 +12,8 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
+from hexapod_gait import robot_config as cfg
+
 
 def generate_launch_description():
     pkg = FindPackageShare("hexapod_description")
@@ -47,11 +49,21 @@ def generate_launch_description():
     gait = Node(package="hexapod_gait", executable="gait_node", output="screen",
                 parameters=[{"use_sim_time": True}])
 
+    # arm_controller only exists in controllers.yaml when robot_config.ARM is
+    # on, so spawning it unconditionally would fail on a plain hexapod. One
+    # switch drives the URDF, the controller list and this.
+    controllers = [legs]
+    if cfg.ARM:
+        # Holds the arm in its rest pose until an arm node drives it.
+        controllers.append(Node(package="controller_manager", executable="spawner",
+                                arguments=["arm_controller"]))
+    controllers.append(gait)
+
     return LaunchDescription([
         gazebo,
         state_publisher,
         bridge,
         spawn,
         RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=[joint_states])),
-        RegisterEventHandler(OnProcessExit(target_action=joint_states, on_exit=[legs, gait])),
+        RegisterEventHandler(OnProcessExit(target_action=joint_states, on_exit=controllers)),
     ])

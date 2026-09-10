@@ -1,7 +1,18 @@
-#Hexabeast
+# Hexabeast
 
-An 18-servo hexapod on an ESP32: designed in SolidWorks, simulated in Gazebo,
-driven by ROS 2.
+An 18-servo FPV hexapod: designed in SolidWorks, simulated in Gazebo, driven
+by ROS 2, and flown from a phone over its own WiFi.
+
+| | |
+|---|---|
+| Size | 34 cm foot span, 18 cm body, ~1.3 kg |
+| Servos | 18x DT996 (MG996R form factor, 15 kg.cm digital) at 6 V |
+| Brain | ESP32-S3 camera module, SoftAP, MJPEG video + WebSocket control |
+| Drivers | 2x PCA9685, 32 PWM channels from two I2C pins |
+
+Sizing is not arbitrary: `tools/scale_torque.py` puts the DT996 ceiling at
+~41 cm foot span, and 34 cm leaves a comfortable margin. See
+[docs/hardware.md](docs/hardware.md).
 
 ## The one rule
 
@@ -28,7 +39,8 @@ tools/
 docs/
   wsl-ros2-setup.md      installing WSL2 + ROS 2 Jazzy + Gazebo Harmonic, running the sim
   solidworks-export.md   naming and axis conventions for the sw2urdf export
-  hardware.md            parts, wiring, power, servo calibration, torque findings
+  hardware.md            wiring, power, camera/FPV link, servo calibration, torque
+  bom.md                 electronics bill of materials with addresses and gotchas
 sim/godot/               ARCHIVED Phase 0/1 Godot simulation. Its findings are kept below
                          and in hardware.md; it is not developed further.
 ```
@@ -60,8 +72,10 @@ The servo model comes with the physics engine.
       Packages written; need WSL to build and verify.
 - [ ] **Phase 3 - SolidWorks.** Model the robot, export with sw2urdf, drop the
       body half into `hexapod_description`. Real masses and inertias.
-- [ ] **Phase 4 - micro-ROS on the ESP32.** The board becomes a ROS 2 node
-      taking the same joint commands: one brain, sim and real robot.
+- [ ] **Phase 4 - ESP32 firmware and FPV.** Gait on the board, servos over
+      two PCA9685s, MJPEG stream and a WebSocket taking the same `/cmd_vel`
+      the sim's gait node takes - one brain, sim and real robot. The phone
+      opens `192.168.4.1`; no app.
 - [ ] **Phase 5 - the real robot.** Calibrate per `docs/hardware.md`, stand,
       walk, then close the loop on the IMU and the foot switches.
 

@@ -55,7 +55,7 @@ le dépôt dans le système de fichiers Linux :
 ```bash
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone /mnt/c/Users/<toi>/Documents/Robot hexapod   # ou git clone git@github.com:Brun0zinh0/Octobeast.git hexapod
+git clone /mnt/c/Users/<toi>/Documents/Robot hexapod   # ou git clone https://github.com/Brun0zinh0/Hexabeast.git hexapod
 cd ~/ros2_ws
 sudo rosdep init 2>/dev/null; rosdep update
 rosdep install --from-paths src --ignore-src -r -y

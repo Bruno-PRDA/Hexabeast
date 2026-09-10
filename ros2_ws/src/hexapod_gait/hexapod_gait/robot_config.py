@@ -28,9 +28,14 @@ CYCLE_TIME = 0.9       # seconds per gait cycle
 JOINT_CENTER_DEG = (0.0, 22.0, -94.0)   # coxa, femur, tibia
 JOINT_TRAVEL_DEG = 80.0                 # usable travel either side of centre
 
-# --- Servo model (MG996R class at ~5 V; swap in your datasheet) ----------------
-SERVO_TORQUE = 0.90             # N.m stall
-SERVO_SPEED = 6.0               # rad/s no-load
+# --- Servo model: DT996 (MG996R form factor, digital, metal gear, 180 deg) -----
+# Sold as 15 kg.cm: 13.5 kg.cm (1.32 N.m) at 4.8 V, 15.2 kg.cm (1.49 N.m) at 6 V.
+# Those are labels. Clones of this class routinely measure nearer a genuine
+# MG996R's 11 kg.cm, so the figure below is the advertised 6 V torque derated
+# 25 % - design to this and the robot still works if the servos under-deliver.
+# Run them at 6 V, not 4.8: the extra torque is free and this design uses it.
+SERVO_TORQUE = 1.10             # N.m, derated design value (advertised 1.49)
+SERVO_SPEED = 6.5               # rad/s no-load (0.16 s per 60 deg at 6 V)
 SERVO_REFLECTED_INERTIA = 5e-4  # kg.m^2 at the output shaft, keeps the solver calm
 FOOT_FRICTION = 0.8
 
@@ -54,6 +59,24 @@ LEGS = [
 
 # Joint names in the order ros2_control and the gait node use.
 JOINT_NAMES = [f"{leg}_{joint}" for leg, _m, _y, _g in LEGS for joint in ("coxa", "femur", "tibia")]
+
+# --- Arm (SpiderPi-Pro style: 5 DoF + gripper on the front) ------------------------
+# The arm's first joint frame is rotated so its +X points up; pitch axes are
+# then +Y (positive tips the link forward) and yaw/roll are +X. Link lengths are
+# placeholders until the CAD exists. Set ARM = False for a plain hexapod - and
+# drop the arm_controller spawner from sim.launch.py.
+ARM = False
+ARM_MOUNT = (0.060, 0.0, 0.011)   # top of the body, near the front
+# name, axis in the joint frame, link length after the joint (m), link mass (kg), rest angle (deg)
+ARM_JOINTS = [
+    ("arm_base", "1 0 0", 0.040, 0.06, 0.0),        # yaw about the vertical post
+    ("arm_shoulder", "0 1 0", 0.100, 0.07, 35.0),   # pitch, positive tips forward
+    ("arm_elbow", "0 1 0", 0.100, 0.06, 100.0),
+    ("arm_wrist", "0 1 0", 0.040, 0.05, 45.0),
+    ("arm_roll", "1 0 0", 0.030, 0.03, 0.0),
+    ("arm_gripper", "0 0 1", 0.040, 0.02, 20.0),    # the moving finger; opening angle
+]
+ARM_JOINT_NAMES = [j[0] for j in ARM_JOINTS] if ARM else []
 
 # PCA9685 channel per joint, same order: left legs on the board at 0x40
 # (channels 0-15), right legs on the board at 0x41 (16-31).
