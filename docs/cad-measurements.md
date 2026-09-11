@@ -49,44 +49,83 @@ The servo STL reports 41.6 g at PLA density. Ignore it - a DT996 is motor,
 metal gears and a PCB, and weighs **55 g**. Only printed parts may take the
 plastic density.
 
-## The problem: this leg is too big for DT996 servos
+## The problem: this leg is proportioned for stronger servos
 
-Torque from `tools/scale_torque.py`, calibrated against the 0.83 N.m the
-Phase-1 physics sim measured while climbing.
+> **Correction (2026-09-11).** An earlier version of this file said 4.4x over
+> budget. That was wrong. `scale_torque.py`'s `reach` is the **stance lever
+> arm** - the horizontal coxa-axis-to-foot distance while standing - and I fed
+> it the fully-extended link chain instead, overstating torque by about 1.9x.
+> The corrected figures are below.
 
-| Leg size | Reach | All-up | Climb torque | vs 1.12 N.m usable |
-|----------|-------|--------|--------------|--------------------|
-| **100 % (as drawn)** | 459 mm | 1.90 kg | **4.96 N.m** | **4.4x over** |
-| 60 % | 275 mm | 1.42 kg | 2.22 N.m | 2.0x over |
-| 50 % | 229 mm | 1.37 kg | 1.78 N.m | 1.6x over |
-| 40 % | 183 mm | 1.33 kg | 1.38 N.m | 1.2x over |
-| 33 % | 150 mm | 1.31 kg | 1.12 N.m | at the limit |
+Torque is `C x mass x g x stance_reach`, calibrated against the 0.83 N.m the
+Phase-1 sim measured while climbing. Two things follow.
 
-**The DT996 ceiling is 150 mm reach - 33 % of the leg as drawn.**
+**The limit is stance reach, not link length.** At ~1.34 kg all-up, the DT996
+ceiling is **147 mm of stance reach**, whatever the links measure - a longer
+leg can always stand more tucked, trading ground clearance for torque.
 
-The cause is leverage, not weight. All-up mass barely moves between these rows
-(1.31 to 1.90 kg) because 18 servos are a fixed 990 g whatever the frame does.
-What changes is the lever arm: torque at the coxa is roughly body weight times
-horizontal reach, and reach here went up 4.8x against the simulated design.
+**The leg as drawn** stands at 242 mm reach with a sim-like tuck, needing
+2.61 N.m against 1.12 N.m usable: **2.3x over**, not 4.4x.
 
-Note the *reach* multiplier is 4.8x while the *link chain* is only 2.5x longer.
-Reach is the horizontal distance from the coxa axis to the foot in the stance
-pose, and the simulated robot stands with its legs tucked (95 mm of a possible
-180 mm). A leg drawn stretched out is far more demanding than its link lengths
-alone suggest.
+## Uniform scaling is the wrong operation
 
-## Ways forward
+A DT996 is 40.7 x 19.7 x 42.9 mm at every scale. The leg is a mix of *length*
+features, which should scale, and *servo interface* features, which must not.
+Shrinking both together fails from below long before torque becomes the issue:
 
-| Option | Leg | Servos | Servo cost (18) | Result |
-|--------|-----|--------|-----------------|--------|
-| Scale down | 33 % | DT996 as planned | ~110 EUR | 150 mm reach, ~41 cm span - matches the sim exactly |
-| Middle | 45 % | DS3225 (25 kg.cm) | ~270 EUR | 206 mm reach, ~55 cm span, 1.58 vs 1.84 N.m usable |
-| Full size | 100 % | 67 kg.cm class | ~990 EUR | 459 mm reach, ~1 m span |
+| Scale | Links (mm) | Stance | Torque | articulation 1 | Verdict |
+|-------|-----------|--------|--------|----------------|---------|
+| 33 % | 20 / 46 / 86 | 80 mm | 0.59 N.m (1.9x margin) | **27 mm** | unbuildable - must bolt a 41 mm servo |
+| 40 % | 24 / 56 / 104 | 97 mm | 0.73 N.m | **33 mm** | unbuildable |
+| 50 % | 30 / 70 / 130 | 121 mm | 0.94 N.m | 41 mm | exactly servo-length, no wall |
+| 55 % | 33 / 77 / 142 | 132 mm | ~1.09 N.m | 45 mm | workable |
+| 60 % | 36 / 84 / 155 | 145 mm | 1.17 N.m | 49 mm | over torque |
 
-The middle option is the interesting one: 45 % of the drawn leg on DS3225s
-keeps a robot half a metre across for about 160 EUR more than the DT996 plan.
-Going full size means serial-bus servos and roughly nine times the servo
-budget - a different class of machine.
+At 33 % the *torque is comfortable* - 0.59 N.m with 1.9x margin. What fails is
+geometry: articulation 1 carries the femur servo and currently spans 81.7 mm
+around it. At 27 mm it is smaller than the servo it must hold.
 
-Whatever is chosen, `robot_config.py` still holds the 30/60/90 placeholder.
-Nothing downstream - URDF, gait, torque budget - reflects the CAD yet.
+The usable window for uniform scaling is roughly 55-58 %, which is thin. The
+better move is to scale the link *lengths* to the torque budget and redraw the
+brackets at servo size.
+
+## Decided: 42 % of the CAD
+
+Scaled on 2026-09-11, keeping the DT996 servos. `robot_config.py` now holds:
+
+| | Value | Was (placeholder) |
+|---|-------|-------------------|
+| Links | 25 / 59 / 109 mm | 30 / 60 / 90 |
+| Proportions | 1 : 2.36 : 4.36 | 1 : 2 : 3 |
+| Link chain | 193 mm | 180 mm |
+| Stance reach | 102 mm | 95 mm |
+| Stand height | 81 mm | 75 mm |
+| Foot span | 344 mm | 330 mm |
+| All-up mass | 1.61 kg | 1.32 kg |
+| Servo centres | 0 / 45 / -105 deg | 0 / 22 / -94 |
+
+The proportions are the CAD's to within a percent, so this is the same leg at
+42 %, not a different design. Torque lands at 0.54 N.m standing and 0.94 N.m
+climbing against 1.12 N.m usable - a **1.19x margin**.
+
+Why 42 % and not the 33 % first asked for: at 33 % the torque was never the
+problem (0.59 N.m, 1.9x margin) - `articulation 1` fell to 27 mm while still
+needing to bolt on a 40.7 mm servo. 42 % puts it at 34 mm, which still means
+**redrawing the brackets around the servo** rather than scaling them. The link
+*lengths* scale; the *servo interfaces* cannot.
+
+Worst-case joint excursions from centre are coxa 44, femur 62, tibia 68 deg,
+all inside the 80 deg of usable travel - so the horns can be fitted at the
+centres above and every walking pose is reachable.
+
+### What still has to change in CAD
+
+- `articulation 1` and `articulation 2`: redraw at 42 % **length**, servo
+  mounting features at full size.
+- `leg1` (tibia): 259 -> 109 mm. This one is pure length, so it scales cleanly.
+- The body does not exist yet. `LEGS` still assumes hip axes 70 mm off centre;
+  that is the number to design the chassis around, or change and re-run.
+
+Nothing about the servo calibration survives a geometry change - re-run
+`python tools/check_ik.py` and copy the new midpoints into `JOINT_CENTER_DEG`
+before fitting a single horn.

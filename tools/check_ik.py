@@ -6,7 +6,14 @@ up here in milliseconds instead of as a robot doing the splits on screen.
 """
 import math
 
-COXA, FEMUR, TIBIA = 0.030, 0.060, 0.090
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "ros2_ws", "src", "hexapod_gait"))
+from hexapod_gait import robot_config as cfg  # noqa: E402
+
+# Read the geometry rather than restating it - these numbers move whenever the
+# CAD is remeasured, and a stale copy here silently mis-calibrates the horns.
+COXA, FEMUR, TIBIA = cfg.COXA, cfg.FEMUR, cfg.TIBIA
 
 
 def solve(x, y, z, coxa=COXA, femur=FEMUR, tibia=TIBIA):
@@ -31,7 +38,7 @@ def foot_position(a, coxa=COXA, femur=FEMUR, tibia=TIBIA):
     return (horiz * math.cos(c), vert, -horiz * math.sin(c))
 
 
-REACH, STAND = 0.095, 0.075
+REACH, STAND = cfg.REACH, cfg.STAND_HEIGHT
 worst = 0.0
 fails = []
 # Sweep the workspace the gait actually visits: the neutral stance plus the

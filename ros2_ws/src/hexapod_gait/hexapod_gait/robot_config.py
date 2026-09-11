@@ -6,9 +6,17 @@ controller list, the gait node, later the firmware - is derived from here.
 """
 
 # --- Leg link lengths: axis to axis, not part length ------------------------
-COXA = 0.030     # hip pivot -> femur pivot
-FEMUR = 0.060    # femur pivot -> knee
-TIBIA = 0.090    # knee -> foot tip
+# Measured off the SolidWorks leg (docs/cad-measurements.md) at 59.8 / 139.9 /
+# 259.0 mm, then scaled to 42 %. The proportions are the CAD's exactly
+# (1 : 2.36 : 4.36 against its 1 : 2.34 : 4.33) - this is the same leg, smaller.
+#
+# 42 % is set by torque, not by looks. A DT996 gives 1.12 N.m usable, the robot
+# masses 1.61 kg, and a tripod puts a third of that on each planted foot at the
+# end of the stance lever. 102 mm of stance reach needs 0.54 N.m standing and
+# 0.94 N.m climbing - a 1.19x margin. Every extra centimetre of reach spends it.
+COXA = 0.025     # hip pivot -> femur pivot
+FEMUR = 0.059    # femur pivot -> knee
+TIBIA = 0.109    # knee -> foot tip
 FOOT_RADIUS = 0.008
 
 # --- Body -------------------------------------------------------------------
@@ -17,15 +25,19 @@ BODY_WID = 0.100
 BODY_THK = 0.022
 
 # --- Posture and gait ---------------------------------------------------------
-STAND_HEIGHT = 0.075   # body centre above the feet when standing
-REACH = 0.095          # horizontal coxa pivot -> foot at neutral stance
-STEP_HEIGHT = 0.035    # peak foot lift during swing
+STAND_HEIGHT = 0.081   # body centre above the feet when standing
+REACH = 0.102          # horizontal coxa pivot -> foot at neutral stance
+STEP_HEIGHT = 0.038    # peak foot lift during swing
 CYCLE_TIME = 0.9       # seconds per gait cycle
 
 # --- Servo calibration ----------------------------------------------------------
 # Pose to hold each joint in while fitting the horn: that pose is servo centre.
-# Found by tools/check_ik.py; the tibia lives around -94 deg for the whole gait.
-JOINT_CENTER_DEG = (0.0, 22.0, -94.0)   # coxa, femur, tibia
+# Found by tools/check_ik.py, which sweeps the walking envelope and reports the
+# midpoint of each joint's travel. Re-run it after any geometry change: these
+# moved from (0, 22, -94) when the links were rescaled to the CAD.
+# Worst-case excursion from centre is then coxa 44, femur 48, tibia 62 deg,
+# all inside the 80 deg of usable travel either side.
+JOINT_CENTER_DEG = (0.0, 45.0, -105.0)   # coxa, femur, tibia
 JOINT_TRAVEL_DEG = 80.0                 # usable travel either side of centre
 
 # --- Servo model: DT996 (MG996R form factor, digital, metal gear, 180 deg) -----
@@ -39,11 +51,14 @@ SERVO_SPEED = 6.5               # rad/s no-load (0.16 s per 60 deg at 6 V)
 SERVO_REFLECTED_INERTIA = 5e-4  # kg.m^2 at the output shaft, keeps the solver calm
 FOOT_FRICTION = 0.8
 
-# --- Masses (kg) - weigh the real parts, the torque margin scales with them ----
-MASS_BODY = 0.45     # frame + ESP32 + two PCA9685 + 2S battery
-MASS_COXA = 0.06     # essentially one servo
-MASS_FEMUR = 0.065   # servo + bracket
-MASS_TIBIA = 0.02
+# --- Masses (kg) - from the CAD's STL volumes plus real servo weights ----------
+# A link's mass includes the servo it CARRIES, not the one that drives it.
+# Printed parts are 30 % infill (~46 % of solid PLA); the servo STL must never
+# be taken at plastic density - a DT996 is motor, metal gears and a PCB, 55 g.
+MASS_BODY = 0.79     # 6 coxa servos 330 + battery 260 + electronics 50 + chassis 150
+MASS_COXA = 0.065    # femur servo 55 + printed bracket 10
+MASS_FEMUR = 0.063   # knee servo 55 + printed link 8
+MASS_TIBIA = 0.008   # printed only, no servo beyond it
 
 # --- Leg layout ---------------------------------------------------------------------
 # name, hip pivot in the body frame, rest direction (yaw from +X, degrees), tripod.
