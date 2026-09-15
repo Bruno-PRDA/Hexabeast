@@ -55,7 +55,10 @@ FOOT_FRICTION = 0.8
 # A link's mass includes the servo it CARRIES, not the one that drives it.
 # Printed parts are 30 % infill (~46 % of solid PLA); the servo STL must never
 # be taken at plastic density - a DT996 is motor, metal gears and a PCB, 55 g.
-MASS_BODY = 0.79     # 6 coxa servos 330 + battery 260 + electronics 50 + chassis 150
+MASS_BODY = 0.737    # 6 coxa servos 330 + battery 260 + electronics 50
+                     # + body plate 67 + camera mast and module 30.
+                     # Plate and mast are measured off the generated CAD;
+                     # tools/gen_robot_cad.py prints them.
 MASS_COXA = 0.065    # femur servo 55 + printed bracket 10
 MASS_FEMUR = 0.063   # knee servo 55 + printed link 8
 MASS_TIBIA = 0.008   # printed only, no servo beyond it

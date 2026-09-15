@@ -14,8 +14,8 @@
     <visual><geometry><box size="0.18000 0.10000 0.02200"/></geometry><material name="body"/></visual>
     <inertial>
       <origin xyz="0.00000 0.00000 0.00000"/>
-      <mass value="0.79"/>
-      <inertia ixx="6.902e-04" iyy="2.165e-03" izz="2.791e-03" ixy="0" ixz="0" iyz="0"/>
+      <mass value="0.737"/>
+      <inertia ixx="6.439e-04" iyy="2.020e-03" izz="2.604e-03" ixy="0" ixz="0" iyz="0"/>
     </inertial>
   </link>
 
