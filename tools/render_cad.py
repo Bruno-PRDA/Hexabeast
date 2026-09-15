@@ -111,6 +111,8 @@ def main():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CAD", "export"))
     ap.add_argument("--out", default="cad_views.png")
     ap.add_argument("--size", type=int, default=620)
+    ap.add_argument("--spread", action="store_true",
+                    help="lay parts side by side (they share an origin)")
     args = ap.parse_args()
 
     parts = load(args.path)
@@ -118,6 +120,18 @@ def main():
         print(f"no STL found under {args.path}")
         return 1
     print(f"{len(parts)} parts, {sum(len(t) for _n, t in parts)} triangles")
+    if args.spread:
+        # Each generated part is modelled about its own joint axis, so they
+        # pile up at the origin. Shift them apart along Y just for viewing.
+        y = 0.0
+        spread = []
+        for name, tris in parts:
+            depth = float(tris[:, :, 1].max() - tris[:, :, 1].min())
+            shifted = tris.copy()
+            shifted[:, :, 1] += y - float(tris[:, :, 1].min())
+            spread.append((name, shifted))
+            y += depth + 12.0
+        parts = spread
 
     s = args.size
     sheet = Image.new("RGB", (s * 2, s * 2 + 30), (255, 255, 255))
