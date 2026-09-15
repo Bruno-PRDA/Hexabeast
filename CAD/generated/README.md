@@ -9,7 +9,7 @@ by hand — regenerate.
 | `femur_link` | femur axis -> knee servo axis, 59 mm | ~7.0 g |
 | `tibia` | knee axis -> foot tip, 109 mm | ~8.2 g |
 | `body` | six coxa mounts, electronics, battery, mast socket | ~67 g |
-| `camera_mast` | ESP32-S3 camera at 110 mm, tilted 15 deg down | ~15 g |
+| `head` | LCD face, proximity sensor and camera, tilted 15 deg down | ~19 g |
 | `assembly.stl` | the lot at stance pose - for viewing, not printing | - |
 
 Print six each of the three leg parts, one body, one mast: **205 g** of
@@ -28,10 +28,19 @@ there was nothing to measure.
 
 ## Two things the assembly check found
 
-**The camera mast is 105 mm because of the knees, not the body.** A front leg's
+**The head height is set by the knees, not the body.** A front leg's
 knee rises to 80 mm above the plate at the top of its swing. The first draft
 put the camera at 62 mm, which would have had legs sweeping through the shot
-every stride. 105 mm clears the worst case by 30 mm.
+every stride. The camera sits at 115 mm, clearing the worst case by 35 mm; the LCD face is
+at 86 mm and the proximity sensor at 60 mm.
+
+**Styling is packaging, not decoration.** The body is overlapping circular
+lobes down the centreline - narrow head, broad thorax across the leg roots,
+pinched waist, bulbous abdomen - and each lobe is sized by what sits under
+it: the abdomen by the LiPo, the thorax by the hip spacing. Smoothness comes
+from spacing the lobes 7 mm apart rather than from filleting, because
+OpenCASCADE refused to round this outline at any radius and one awkward
+cusp rejects the whole batch.
 
 **Each foot lands 11.9 mm off the ideal.** The femur servo bolts to a wall, so
 its shaft cannot sit on the leg's centre plane - the offset is the servo's half

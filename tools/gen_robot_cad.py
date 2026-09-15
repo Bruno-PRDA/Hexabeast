@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the whole robot: body, camera mast, and a stance-pose assembly.
+"""Generate the whole robot: body, head, and a stance-pose assembly.
 
     python tools/gen_robot_cad.py               # parts + assembly into CAD/generated/
     python tools/gen_robot_cad.py --check       # build and verify, no export
@@ -12,14 +12,21 @@ The assembly is not decoration. It is built by chaining the REAL mechanical
 offsets - wall thicknesses, servo heights, horn faces - and then asking where
 each foot actually lands. The kinematic model assumes an ideal planar leg, so
 any gap between the two is a gap between the robot and its own simulator.
+
+STYLING. The body is overlapping circular lobes down the centreline rather than
+a rectangle, which buys a spider's silhouette almost for free: narrow at the
+head, broad across the leg roots, pinched at the waist, bulbous behind. Each
+lobe still earns its place - the abdomen is sized by the LiPo under it, the
+thorax by the hip spacing - so the shape follows the packaging instead of being
+laid on top of it.
 """
 import argparse
 import math
 import os
 import sys
 
-from build123d import (Align, Box, Cylinder, Pos, Rot, Vector, export_step,
-                       export_stl)
+from build123d import (Align, Axis, Box, Cylinder, Pos, Rot, export_step,
+                       export_stl, fillet)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "ros2_ws", "src", "hexapod_gait"))
@@ -30,34 +37,67 @@ import gen_leg_cad as leg  # noqa: E402
 OUT = os.path.join(ROOT, "CAD", "generated")
 
 # --- Body --------------------------------------------------------------------
-BODY_T = 5.0             # plate thickness
-HIP_PAD_R = 30.0         # material around each coxa servo cutout
-CORE_L = 150.0           # central slab, carries the electronics
-CORE_W = 104.0
+BODY_T = 5.0
+HIP_PAD_R = 32.0
+EDGE_FILLET = 7.0        # softens the cusps where lobes meet
+
+# (x, y, radius) down the centreline, front to back.
+#
+# The radii are not free. Two circles that barely overlap meet at a razor cusp,
+# and no fillet fits into it - the first attempt had the middle hip pads
+# overlapping the thorax by about 1 mm and the whole rounding operation failed.
+# Every lobe here overlaps its neighbours, and every hip pad overlaps the spine,
+# by at least 8 mm. That is what makes the outline roundable.
+BODY_LOBES = [
+    (86.0, 0.0, 24.0),    # head end - the neck bolts here
+    (58.0, 0.0, 40.0),
+    (22.0, 0.0, 54.0),    # thorax, widest where the front legs load it
+    (-8.0, 0.0, 46.0),
+    (-32.0, 0.0, 24.0),   # waist - the pinch is what reads as a spider
+    (-58.0, 0.0, 42.0),
+    (-82.0, 0.0, 46.0),   # abdomen, sized by the 2S LiPo beneath it
+    (-108.0, 0.0, 30.0),  # abdomen tip
+]
 
 # --- Electronics footprints --------------------------------------------------
-# PCA9685 breakout: 62.5 x 25.4 mm, 4 holes on a 57.2 x 20.3 pitch.
-PCA_HOLE_X, PCA_HOLE_Y = 57.2, 20.3
-PCA_SCREW_D = 2.8        # M2.5 clearance
-# ESP32-S3 CAM carrier. VERIFY - boards differ; Freenove and XIAO are not alike.
-ESP_HOLE_X, ESP_HOLE_Y = 40.0, 20.0
+PCA_HOLE_X, PCA_HOLE_Y = 57.2, 20.3     # PCA9685 breakout, 62.5 x 25.4 board
+PCA_SCREW_D = 2.8
+ESP_HOLE_X, ESP_HOLE_Y = 40.0, 20.0     # VERIFY - Freenove and XIAO differ
 ESP_SCREW_D = 2.4
-# Battery strap slots for a 2S LiPo.
 BATT_SLOT_W, BATT_SLOT_L, BATT_SLOT_SEP = 4.0, 26.0, 70.0
+BATT_X = -78.0                          # strap slots under the abdomen
 
-# --- Camera mast -------------------------------------------------------------
-# The knees are what set this, not the body. A front leg's knee rises to 80 mm
-# above the plate at the top of its swing - stand the camera at 62 mm, as the
-# first draft did, and the legs sweep up through the shot every stride. 105 mm
-# clears the worst case by 25 mm.
-MAST_H = 105.0           # camera eye height above the body plate
-MAST_W = 26.0
-MAST_T = 8.0             # thicker, because it is now tall enough to wobble
-CAM_TILT = 15.0          # degrees nose-down; the robot should see its own feet
-CAM_PLATE_W, CAM_PLATE_H, CAM_PLATE_T = 34.0, 32.0, 4.0
+# --- Head --------------------------------------------------------------------
+# Height is set by the KNEES, not the body. A front leg's knee rises to 80 mm
+# above the plate at the top of its swing; a camera at 62 mm would have legs
+# sweeping through the shot every stride.
+# NECK_H is the head CENTRE; the camera turret rides HEAD_H/2 + CAM_RISE above
+# that, so the neck itself is shorter than the camera height it produces.
+NECK_H = 72.0
+NECK_W = 24.0
+NECK_T = 8.0
+NECK_SCREW_D = 3.4
+NECK_FOOT_L = 26.0
+HEAD_TILT = 15.0         # nose-down, so the robot can see its own feet
+
+HEAD_W, HEAD_H, HEAD_T = 46.0, 54.0, 8.0
+HEAD_FILLET = 8.0
+
+# 1.3" SSD1306 OLED - the face. I2C 0x3C, so it costs no pins.
+LCD_WIN_W, LCD_WIN_H = 30.0, 17.0       # visible glass
+LCD_HOLE_X, LCD_HOLE_Y = 30.5, 28.0
+LCD_SCREW_D = 2.4
+LCD_Z = 9.0                             # above the head centre
+
+# VL53L0X time-of-flight. I2C 0x29, also free.
+PROX_WIN_D = 5.0
+PROX_HOLE_PITCH = 20.0
+PROX_SCREW_D = 2.4
+PROX_Z = -17.0
+
 CAM_LENS_D = 11.0
-MAST_SCREW_D = 3.4       # M3 into the body
-MAST_FOOT_L = 26.0
+CAM_HOLE_Y = ESP_HOLE_Y
+CAM_RISE = 11.0                         # turret above the face's top edge
 
 
 def _hips():
@@ -65,77 +105,129 @@ def _hips():
     return [(m[0] * 1000, m[1] * 1000, yaw) for _n, m, yaw, _g in cfg.LEGS]
 
 
-def make_body():
-    """Body plate: six coxa servo mounts, electronics, battery, mast socket.
+def _try_fillet(part, radius, axis=Axis.Z):
+    """Fillet edges along `axis`, backing off until one radius fits.
 
-    A coxa servo's shaft is VERTICAL, so the plate it bolts to is horizontal -
-    the easy orientation. Each servo body points INWARD so the plate stays
-    compact and the legs get a clear sweep outside it.
+    OpenCASCADE refuses a fillet it cannot fit, and a body built from
+    overlapping lobes has cusps of wildly varying angle - one tight corner
+    rejects the whole operation. Retry smaller rather than give up: a 3 mm
+    round still reads as organic, and losing the part is worse than losing
+    4 mm of softness.
     """
-    part = Pos(0, 0, 0) * Box(CORE_L, CORE_W, BODY_T,
-                              align=(Align.CENTER, Align.CENTER, Align.MIN))
+    for r in (radius, radius * 0.7, radius * 0.45, radius * 0.3):
+        try:
+            out = fillet(part.edges().filter_by(axis), radius=r)
+            if r < radius:
+                print(f"  (fillet backed off to r={r:.1f})")
+            return out
+        except Exception:                                      # noqa: BLE001
+            continue
+    print(f"  (fillet r={radius} skipped - no radius fitted)")
+    return part
+
+
+def _spine(step=7.0):
+    """BODY_LOBES interpolated into closely-spaced circles.
+
+    Smoothness comes from spacing, not from filleting. OpenCASCADE would not
+    round this outline at any radius - a single awkward cusp rejects the whole
+    batch, and max_fillet could not even converge - so the shape is made smooth
+    by construction instead. Circles 7 mm apart with a smoothstepped radius
+    leave cusps too shallow to see, and it cannot fail.
+    """
+    out = []
+    for (x0, y0, r0), (x1, y1, r1) in zip(BODY_LOBES, BODY_LOBES[1:]):
+        span = math.dist((x0, y0), (x1, y1))
+        n = max(1, int(span / step))
+        for i in range(n):
+            u = i / n
+            s = u * u * (3.0 - 2.0 * u)          # smoothstep, so radius eases
+            out.append((x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, r0 + (r1 - r0) * s))
+    out.append(BODY_LOBES[-1])
+    return out
+
+
+def make_body():
+    """Body plate: six coxa mounts, electronics, battery, neck socket."""
+    part = None
+    for x, y, r in _spine():
+        lobe = Pos(x, y, 0) * Cylinder(r, BODY_T,
+                                       align=(Align.CENTER, Align.CENTER, Align.MIN))
+        part = lobe if part is None else part + lobe
     for hx, hy, _yaw in _hips():
         part += Pos(hx, hy, 0) * Cylinder(
             HIP_PAD_R, BODY_T, align=(Align.CENTER, Align.CENTER, Align.MIN))
 
     cuts = None
     for hx, hy, yaw in _hips():
-        # +180 so the servo body extends toward the centre, not off the edge.
+        # +180 so the servo body points inward, not off the edge.
         c = Pos(hx, hy, 0) * Rot(0, 0, yaw + 180) * leg.servo_cut()
         cuts = c if cuts is None else cuts + c
 
-    # Two PCA9685s, one either side of the battery.
-    for sy in (-1, 1):
-        for hx in (-PCA_HOLE_X / 2, PCA_HOLE_X / 2):
-            for hy in (-PCA_HOLE_Y / 2, PCA_HOLE_Y / 2):
-                cuts += Pos(hx, sy * 36.0 + hy, 0) * Cylinder(PCA_SCREW_D / 2, 60)
+    # Two PCA9685s ACROSS the thorax, not along it: the board is 62.5 mm long
+    # and the pinched waist only 48 mm wide, so lengthwise they would hang off
+    # the edge. Turned 90 degrees they sit in the widest part of the body.
+    for cx in (8.0, -18.0):
+        for hx in (-PCA_HOLE_Y / 2, PCA_HOLE_Y / 2):
+            for hy in (-PCA_HOLE_X / 2, PCA_HOLE_X / 2):
+                cuts += Pos(cx + hx, hy, 0) * Cylinder(PCA_SCREW_D / 2, 60)
 
-    # ESP32-S3 carrier, centre-front.
-    for hx in (-ESP_HOLE_X / 2, ESP_HOLE_X / 2):
+    for hx in (-ESP_HOLE_X / 2, ESP_HOLE_X / 2):   # ESP32-S3, thorax front
         for hy in (-ESP_HOLE_Y / 2, ESP_HOLE_Y / 2):
-            cuts += Pos(52.0 + hx, hy, 0) * Cylinder(ESP_SCREW_D / 2, 60)
+            cuts += Pos(45.0 + hx, hy, 0) * Cylinder(ESP_SCREW_D / 2, 60)
 
-    # Battery strap slots, centre, under the pack.
-    for sx in (-1, 1):
-        cuts += Pos(sx * BATT_SLOT_SEP / 2, 0, 0) * Box(
+    for sx in (-1, 1):                       # battery straps, under the abdomen
+        cuts += Pos(BATT_X + sx * BATT_SLOT_SEP / 2, 0, 0) * Box(
             BATT_SLOT_W, BATT_SLOT_L, 60)
 
-    # Mast socket: two M3 into the front edge.
-    for sy in (-1, 1):
-        cuts += Pos(CORE_L / 2 - 10.0, sy * 9.0, 0) * Cylinder(MAST_SCREW_D / 2, 60)
+    for sy in (-1, 1):                       # neck socket, front edge
+        cuts += Pos(82.0, sy * 8.0, 0) * Cylinder(NECK_SCREW_D / 2, 60)
 
     return part - cuts
 
 
-def make_camera_mast():
-    """Post carrying the ESP32-S3 camera, tilted nose-down.
+def make_head():
+    """Neck plus the face: LCD, proximity sensor and camera on one part.
 
-    Height is the point: the camera has to see over the front legs, which swing
-    up to STEP_HEIGHT above the body plane during their swing phase.
+    Everything the robot looks at you with. The LCD is the face, the ToF sensor
+    sits below it, and the camera goes above - roughly where a jumping spider
+    keeps its big median eyes, which is most of the charm.
     """
-    part = Pos(0, 0, MAST_H / 2) * Box(MAST_T, MAST_W, MAST_H,
-                                       align=(Align.CENTER, Align.CENTER, Align.CENTER))
-    # Foot flange, bolting to the body's front edge.
-    part += Pos(MAST_FOOT_L / 2 - MAST_T / 2, 0, BODY_T / 2) * Box(
-        MAST_FOOT_L, MAST_W, BODY_T, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    part = Pos(0, 0, NECK_H / 2) * Box(
+        NECK_T, NECK_W, NECK_H, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    part += Pos(NECK_FOOT_L / 2 - NECK_T / 2, 0, BODY_T / 2) * Box(
+        NECK_FOOT_L, NECK_W, BODY_T, align=(Align.CENTER, Align.CENTER, Align.CENTER))
 
-    head = Pos(0, 0, 0) * Box(CAM_PLATE_T, CAM_PLATE_W, CAM_PLATE_H,
-                              align=(Align.CENTER, Align.CENTER, Align.CENTER))
-    lens = Cylinder(CAM_LENS_D / 2, 40, rotation=(0, 90, 0))
-    holes = None
-    for hy in (-ESP_HOLE_Y / 2, ESP_HOLE_Y / 2):
-        for hz in (-ESP_HOLE_X / 2, ESP_HOLE_X / 2):
-            h = Pos(0, hy, hz) * Cylinder(ESP_SCREW_D / 2, 40, rotation=(0, 90, 0))
-            holes = h if holes is None else holes + h
-    head = head - lens - holes
-    part += Pos(0, 0, MAST_H) * Rot(0, CAM_TILT, 0) * head
+    face = Box(HEAD_T, HEAD_W, HEAD_H, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    face = _try_fillet(face, HEAD_FILLET, Axis.X)     # round the face outline
 
-    cuts = None
+    cuts = Pos(0, 0, LCD_Z) * Box(40, LCD_WIN_W, LCD_WIN_H)
+    for hy in (-LCD_HOLE_X / 2, LCD_HOLE_X / 2):
+        for hz in (-LCD_HOLE_Y / 2, LCD_HOLE_Y / 2):
+            cuts += Pos(0, hy, LCD_Z + hz) * Cylinder(LCD_SCREW_D / 2, 40,
+                                                      rotation=(0, 90, 0))
+    cuts += Pos(0, 0, PROX_Z) * Cylinder(PROX_WIN_D / 2, 40, rotation=(0, 90, 0))
     for sy in (-1, 1):
-        c = Pos(MAST_FOOT_L - MAST_T / 2 - 10.0, sy * 9.0, BODY_T / 2) * \
-            Cylinder(MAST_SCREW_D / 2, 40)
-        cuts = c if cuts is None else cuts + c
-    return part - cuts
+        cuts += Pos(0, sy * PROX_HOLE_PITCH / 2, PROX_Z) * \
+            Cylinder(PROX_SCREW_D / 2, 40, rotation=(0, 90, 0))
+
+    part += Pos(0, 0, NECK_H) * Rot(0, HEAD_TILT, 0) * (face - cuts)
+
+    # Camera turret, above the face like a spider's median eyes.
+    turret = Box(HEAD_T, 30.0, 24.0, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    turret = _try_fillet(turret, 6.0, Axis.X)
+    tcut = Cylinder(CAM_LENS_D / 2, 40, rotation=(0, 90, 0))
+    for hy in (-CAM_HOLE_Y / 2, CAM_HOLE_Y / 2):
+        tcut += Pos(0, hy, 0) * Cylinder(ESP_SCREW_D / 2, 40, rotation=(0, 90, 0))
+    part += Pos(0, 0, NECK_H + HEAD_H / 2 + CAM_RISE) * Rot(0, HEAD_TILT, 0) * \
+        (turret - tcut)
+
+    foot_cuts = None
+    for sy in (-1, 1):
+        c = Pos(NECK_FOOT_L - NECK_T / 2 - 10.0, sy * 8.0, BODY_T / 2) * \
+            Cylinder(NECK_SCREW_D / 2, 40)
+        foot_cuts = c if foot_cuts is None else foot_cuts + c
+    return part - foot_cuts
 
 
 # --- assembly ----------------------------------------------------------------
@@ -146,17 +238,10 @@ def stance_angles():
 
 
 def leg_transforms(hx, hy, yaw, angles, z_top):
-    """Locations for (coxa_link, femur_link, tibia) of one leg, in body frame.
-
-    Chains the mechanical offsets the parts actually have, which is what makes
-    the foot check below meaningful: an ideal model would put every axis on the
-    leg's centre plane, and the real bracket cannot.
-    """
+    """Locations for (coxa_link, femur_link, tibia) of one leg, in body frame."""
     c, f, t = (math.degrees(a) for a in angles)
     wall_y = leg.SERVO_W / 2 + leg.CLEAR + leg.WALL / 2
-
     coxa_loc = Pos(hx, hy, z_top) * Rot(0, 0, yaw + c)
-    # The femur axis sits on the wall face, offset sideways and raised.
     femur_loc = coxa_loc * Pos(cfg.COXA * 1000, -wall_y, leg.FEMUR_AXIS_Z) * \
         Rot(-90, 0, 0) * Rot(0, 0, -f)
     knee_loc = femur_loc * Pos(cfg.FEMUR * 1000, 0, 0) * Rot(0, 0, -t)
@@ -169,20 +254,28 @@ def foot_in_body(hx, hy, yaw, angles, z_top):
     return (knee * Pos(cfg.TIBIA * 1000, 0, 0)).position
 
 
-def make_assembly():
-    parts = []
-    body = make_body()
-    parts.append(("body", body))
-    parts.append(("mast", Pos(CORE_L / 2 - MAST_FOOT_L + leg.WALL, 0, BODY_T) *
-                  make_camera_mast()))
+def knee_peak():
+    """Highest a knee reaches while walking - what sets the camera height."""
+    from hexapod_gait import gait
+    femur_axis = BODY_T + leg.FEMUR_AXIS_Z
+    peak = 0.0
+    for i in range(100):
+        lift = gait.foot_offset((0, 0, -cfg.STAND_HEIGHT), (0.10, 0), 0.0, i / 100, 0)[2]
+        f = leg_ik.solve(cfg.REACH, 0.0, -cfg.STAND_HEIGHT + lift)[1]
+        peak = max(peak, femur_axis + cfg.FEMUR * 1000 * math.sin(f))
+    return peak
 
+
+def make_assembly():
+    parts = [("body", make_body()),
+             ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
     a = stance_angles()
-    coxa_p, femur_p, tibia_p = leg.make_coxa_link(), leg.make_femur_link(), leg.make_tibia()
+    coxa_p, femur_p, tibia_p = (leg.make_coxa_link(), leg.make_femur_link(),
+                                leg.make_tibia())
     for i, (hx, hy, yaw) in enumerate(_hips()):
         cl, fl, kl = leg_transforms(hx, hy, yaw, a, BODY_T)
-        parts.append((f"L{i}_coxa", cl * coxa_p))
-        parts.append((f"L{i}_femur", fl * femur_p))
-        parts.append((f"L{i}_tibia", kl * tibia_p))
+        parts += [(f"L{i}_coxa", cl * coxa_p), (f"L{i}_femur", fl * femur_p),
+                  (f"L{i}_tibia", kl * tibia_p)]
     return parts
 
 
@@ -191,17 +284,12 @@ def main():
     ap.add_argument("--check", action="store_true", help="build and verify, no export")
     args = ap.parse_args()
 
-    body = make_body()
-    mast = make_camera_mast()
-    bb = body.bounding_box()
-    mb = mast.bounding_box()
-    print(f"body  {bb.size.X:.0f} x {bb.size.Y:.0f} x {bb.size.Z:.0f} mm   "
-          f"{body.volume/1000:.1f} cm3   ~{body.volume/1000*1.24*0.46:.0f} g")
-    print(f"mast  {mb.size.X:.0f} x {mb.size.Y:.0f} x {mb.size.Z:.0f} mm   "
-          f"{mast.volume/1000:.1f} cm3   ~{mast.volume/1000*1.24*0.46:.0f} g")
+    body, head = make_body(), make_head()
+    for name, p in (("body", body), ("head", head)):
+        bb = p.bounding_box()
+        print(f"{name:6s} {bb.size.X:5.0f} x {bb.size.Y:5.0f} x {bb.size.Z:5.0f} mm   "
+              f"{p.volume/1000:6.1f} cm3   ~{p.volume/1000*1.24*0.46:5.1f} g")
 
-    # Does the CAD chain put the feet where the kinematics says?
-    print("\nfoot position: CAD assembly vs the kinematic model")
     a = stance_angles()
     worst = 0.0
     for i, (hx, hy, yaw) in enumerate(_hips()):
@@ -214,21 +302,27 @@ def main():
         want = (hx + math.cos(yr) * cfg.REACH * 1000,
                 hy + math.sin(yr) * cfg.REACH * 1000,
                 z0 - cfg.STAND_HEIGHT * 1000)
-        d = math.dist((got.X, got.Y, got.Z), want)
-        worst = max(worst, d)
-        print(f"  {cfg.LEGS[i][0]:3s} CAD ({got.X:7.1f},{got.Y:7.1f},{got.Z:7.1f})"
-              f"   model ({want[0]:7.1f},{want[1]:7.1f},{want[2]:7.1f})   off {d:5.1f} mm")
-    print(f"\nworst foot error {worst:.1f} mm")
-    if worst > 2.0:
-        print("The bracket puts each joint axis off the leg's centre plane; the IK")
-        print("assumes an ideal planar leg. See the note printed below.")
+        worst = max(worst, math.dist((got.X, got.Y, got.Z), want))
+    wall_y = leg.SERVO_W / 2 + leg.CLEAR + leg.WALL / 2
+    print(f"\nfoot vs model: worst {worst:.1f} mm - the femur servo's wall offset "
+          f"({wall_y:.1f} mm),")
+    print(f"  a {math.degrees(math.atan2(wall_y, cfg.REACH*1000)):.2f} deg stance "
+          f"rotation rather than a reach error. Trim it out at the coxa.")
+
+    knee = knee_peak()
+    cam = BODY_T + NECK_H + HEAD_H / 2 + CAM_RISE
+    lcd = BODY_T + NECK_H + LCD_Z
+    print(f"\nknee peak while walking {knee:.0f} mm")
+    print(f"camera {cam:.0f} mm  -> clears by {cam-knee:.0f} mm"
+          f"   {'OK' if cam - knee > 15 else 'TOO LOW'}")
+    print(f"LCD face {lcd:.0f} mm, proximity sensor {BODY_T+NECK_H+PROX_Z:.0f} mm")
 
     if not args.check:
         os.makedirs(OUT, exist_ok=True)
         export_step(body, os.path.join(OUT, "body.step"))
         export_stl(body, os.path.join(OUT, "body.stl"))
-        export_step(mast, os.path.join(OUT, "camera_mast.step"))
-        export_stl(mast, os.path.join(OUT, "camera_mast.stl"))
+        export_step(head, os.path.join(OUT, "head.step"))
+        export_stl(head, os.path.join(OUT, "head.stl"))
         asm = None
         for _n, p in make_assembly():
             asm = p if asm is None else asm + p

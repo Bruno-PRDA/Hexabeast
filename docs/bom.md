@@ -17,6 +17,8 @@ everything here is I2C - two pins, five devices:
 | MPU6050 | `0x68` | 6-axis IMU | `AD0` low |
 | PCF8574 | `0x20` | 6 foot contact switches | inputs, switch to GND |
 | INA219 | `0x44` | battery voltage + current | **must be moved off `0x40`** - see gotchas |
+| SSD1306 | `0x3C` | 1.3" OLED - the robot's face | `0x3D` if its jumper is bridged |
+| VL53L0X | `0x29` | time-of-flight proximity | fixed at boot; software-settable |
 
 Run the bus at 400 kHz. `0x70` is the PCA9685 "all call" address and `0x00`
 its reset address, so avoid both if you add anything later.
@@ -94,6 +96,8 @@ All grounds meet at ONE point. 1000 uF+ at each PCA9685, 470 uF at the ESP32.
 | 5.2 | PCF8574 I2C 8-bit GPIO expander | 1 | 3 | Six foot switches on a board with no spare pins. Inputs have weak pull-ups, so wire each switch to GND |
 | 5.3 | Micro lever switch (SS-5GL / D2F class) | 8 | 5 | One per foot + spares. Binary contact, which is what the gait's stumble detector expects |
 | 5.4 | INA219 current/voltage sensor | 1 | 5 | Battery telemetry on the FPV overlay. Knowing your remaining flight time matters more than it sounds |
+| 5.5 | 1.3" OLED, SSD1306, I2C | 1 | 6 | The face. 128x64 is enough for eyes with real expression, and it draws about 20 mA |
+| 5.6 | VL53L0X time-of-flight module | 1 | 5 | Proximity, 30-1200 mm. Unlike an HC-SR04 it is I2C, tiny, and unbothered by soft or angled surfaces |
 
 ## 6. Wiring and assembly
 
@@ -135,8 +139,8 @@ boards with a UBEC each keeps you inside it. If you still see brownouts, feed
 the servos from a separate distribution bus and take only the signal pin from
 the PCA9685.
 
-**Redundant I2C pull-ups.** Five breakouts each carrying 10 k pull-ups put
-about 2 k on the bus. That still works at 400 kHz, but if the bus is flaky,
+**Redundant I2C pull-ups.** Seven breakouts each carrying 10 k pull-ups put
+about 1.4 k on the bus. That still works at 400 kHz, but if the bus is flaky,
 desolder the pull-ups on all but one board.
 
 **Servos are 6 V parts.** 2S LiPo is 8.4 V fully charged. Straight through,

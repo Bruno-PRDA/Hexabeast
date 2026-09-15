@@ -154,8 +154,19 @@ def make_femur_link(d=None):
     width = max(SERVO_W + 2 * WALL, HORN_BOSS_D)
     length = d + SERVO_SHAFT_OFF + SERVO_HOLE_PITCH_L / 2 + 8 + HORN_BOSS_D / 2
 
-    part = Pos(length / 2 - HORN_BOSS_D / 2, 0, 0) * Box(
-        length, width, PLATE, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    # Waisted rather than a plain slab: full width at both ends where the horn
+    # and the servo need material, pinched in the middle where the bending
+    # moment is lowest. Costs nothing, and it is most of what makes a leg read
+    # as a leg rather than a bracket.
+    part = None
+    n = 10
+    for k in range(n):
+        x0, x1 = length * k / n, length * (k + 1) / n
+        u = (x0 + x1) / 2 / length
+        w = width * (1.0 - 0.30 * math.sin(math.pi * u))
+        seg = Pos((x0 + x1) / 2 - HORN_BOSS_D / 2, 0, 0) * Box(
+            x1 - x0 + 0.02, w, PLATE, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        part = seg if part is None else part + seg
     part += horn_boss(PLATE)
     # Side rails: a flat plate this long is weak in bending about Y, and stiffness
     # here costs a gram.
