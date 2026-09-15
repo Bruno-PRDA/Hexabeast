@@ -8,13 +8,29 @@ by hand — regenerate.
 | `coxa_link` | coxa axis -> femur servo axis, 25 mm | ~5.3 g |
 | `femur_link` | femur axis -> knee servo axis, 59 mm | ~6.5 g |
 | `tibia` | knee axis -> foot tip, 109 mm | ~8.6 g |
-| `body` | six coxa mounts, electronics, battery, mast socket | ~70 g |
+| `body` | six coxa mounts, electronics, battery, mast socket | ~69 g |
 | `abdomen` | dome over the rear, houses the UBECs | ~12 g |
-| `head` | LCD face, proximity sensor and camera, tilted 15 deg down | ~19 g |
+| `head` | LCD face, proximity sensor and camera, tilted 15 deg down | ~21 g |
 | `assembly.stl` | the lot at stance pose - for viewing, not printing | - |
 
-Print six each of the three leg parts, one body, one dome, one head: **223 g**
+Print six each of the three leg parts, one body, one dome, one head: **224 g**
 of plastic. With 18 servos and the battery that is **1.53 kg** all-up.
+
+## Open: the camera board does not fit the turret
+
+`gen_robot_cad.py --check` warns about this on every run, deliberately. A
+Freenove ESP32-S3-WROOM CAM is **57.1 x 28.1 mm**; the turret it is drawn on is
+30 x 24. It was modelled 45 x 27 x 20, which is why nothing complained before.
+Three ways out, none of them free:
+
+- **Grow the turret** to about 62 x 34. Simplest, but it puts a panel bigger
+  than the face on top of a 72 mm neck - the worst possible place for mass on
+  a walking robot.
+- **Board under the plate, camera on a flex extension.** The belly has room at
+  x 20..70. The camera is a parallel DVP bus at 20 MHz, so a long flex is a
+  real signal-integrity risk.
+- **Swap to a XIAO ESP32S3 Sense** (21 x 17.5 mm, camera onboard), which fits
+  the turret as drawn. A BOM change.
 
 `.step` imports into SolidWorks as a solid body — editable geometry, but no
 feature tree. `.stl` goes straight to the slicer.
@@ -22,10 +38,12 @@ feature tree. `.stl` goes straight to the slicer.
 Axis spacing is verified from the exported STLs, not just asserted by the
 script: 25.02 / 58.97 / 109.01 mm against the 25 / 59 / 109 in the config.
 
-**Before printing six of these**, check the servo mounting pattern against a
-real DT996 with calipers. The hole spacing here (49.5 x 10 mm, 4.3 mm holes)
-is the published MG996R figure; your own servo model has no holes in it, so
-there was nothing to measure.
+**The servo tab holes are slots, and that is not a nicety.** MG996R clones put
+the long pitch anywhere between 47.8 and 49.5 mm. The original 4.3 mm round
+hole on a 49.5 nominal only reached down to 48.85, so a servo from the bottom
+of that spread would simply not have bolted on. They are now 5.1 x 3.4 mm slots
+on a 48.65 nominal, M3, which covers the whole range - a caliper check is a
+sanity check rather than a gate.
 
 ## Two things the assembly check found
 
@@ -58,6 +76,22 @@ alternate winding by construction and every mirrored void flips it again, so
 most of them were quietly doing nothing and the parts still rendered perfectly.
 Winding is now normalised in one place, and both generators probe for material
 where each void should be.
+
+**A hole is a subtraction, so the check could not see a single screw.** The
+interference check compared solids, and holes carry no fastener - so the shunt
+and the I2C expander both sat directly under fastener tails with about 1.5 mm
+of air, and nothing flagged it. Screws, nuts and proud heads are now modelled
+as solids from the same hole list the plate is drilled from. The sliver
+threshold came down from 60 mm3 to 5 mm3 at the same time: 60 was not small
+enough to be safe, and was hiding a 40 mm3 overlap where the OLED and the ToF
+occupied the same space.
+
+**Things on the head were placed in the body's frame, not the face's.** The
+face tilts 15 degrees nose-down; 22 mm below its centre that swings it 5.7 mm
+backwards. The boards were positioned at a fixed offset as though the head
+stood upright, which put the proximity sensor 0.9 mm inside the slab it bolts
+behind. Everything on the face now goes through `head_frame()`, the same chain
+`make_head()` builds the face on.
 
 **Each foot lands 11.9 mm off the ideal.** The femur servo bolts to a wall, so
 its shaft cannot sit on the leg's centre plane - the offset is the servo's half

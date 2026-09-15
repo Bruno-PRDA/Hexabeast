@@ -106,6 +106,10 @@ ARM_HALF = 20.0          # arm half-width at the coxa axis
 # --- Electronics footprints --------------------------------------------------
 PCA_HOLE_X, PCA_HOLE_Y = 55.88, 19.05  # 2.2 x 0.75 inch - the board is imperial
 PCA_SCREW_D = 2.8
+# The camera board's hole pattern. Used by the HEAD TURRET only: the plate used
+# to carry a copy of it at x=45, for a board that does not sit there and, on the
+# Freenove, has no mounting holes at all. Drilling a pattern for an absent part
+# is how a plate ends up with holes nobody can explain, so it is gone.
 ESP_HOLE_X, ESP_HOLE_Y = 40.0, 20.0     # VERIFY - Freenove and XIAO differ
 ESP_SCREW_D = 2.4
 # BATTERY. The pack hangs UNDER the plate, not inside the abdomen dome. A 2S
@@ -153,24 +157,34 @@ NECK_SCREW_D = 3.4
 NECK_FOOT_L = 26.0
 HEAD_TILT = 15.0         # nose-down, so the robot can see its own feet
 
-HEAD_W, HEAD_H, HEAD_T = 46.0, 54.0, 8.0
+# HEAD_H is 62, not the 54 it started at, because the face has to carry the
+# OLED and the ToF stacked. The ToF was modelled 6.8 mm narrower than the real
+# GY-530; at its true 17.78 mm the two boards need more face than 54 mm has,
+# and they overlapped by 0.04 cm3 - just under the old 0.06 cm3 sliver
+# threshold, so the interference check reported "none" on a real collision.
+HEAD_W, HEAD_H, HEAD_T = 46.0, 62.0, 8.0
 HEAD_FILLET = 8.0
 
 # 1.3" SSD1306 OLED - the face. I2C 0x3C, so it costs no pins.
 LCD_WIN_W, LCD_WIN_H = 30.0, 17.0       # visible glass
 LCD_HOLE_X, LCD_HOLE_Y = 30.5, 28.0
 LCD_SCREW_D = 2.4
-LCD_Z = 9.0                             # above the head centre
+LCD_Z = 6.0                             # above the head centre
 
 # VL53L0X time-of-flight. I2C 0x29, also free.
 PROX_WIN_D = 5.0
 PROX_HOLE_PITCH = 20.0
 PROX_SCREW_D = 2.4
-PROX_Z = -17.0
+PROX_Z = -22.0
 
 CAM_LENS_D = 11.0
 CAM_HOLE_Y = ESP_HOLE_Y
+TURRET_W, TURRET_H = 30.0, 24.0         # the panel the camera board bolts to
 CAM_RISE = 11.0                         # turret above the face's top edge
+
+# Where the head part is bolted to the plate. It was spelled out four separate
+# times; head_frame() below is what everything on the face is now placed in.
+HEAD_X = 82.0 - NECK_FOOT_L + NECK_T
 
 
 def _hips():
@@ -241,6 +255,60 @@ def _plate_solid(shrink=0.0, arms=True):
     return part
 
 
+PCA_CX = (12.0, -16.0)   # driver board centres - see the note in make_electronics
+PCA_STANDOFF = 8.0       # board underside above the plate
+
+
+def _plate_holes():
+    """Every round hole through the plate: (x, y, diameter, protrudes).
+
+    `protrudes` says which side of the plate the fastener sticks out of, which
+    is the whole reason this list exists separately from the cut geometry: a
+    hole is a subtraction and carries no screw, so nothing downstream can see
+    the nut under it. Everything bolted from above leaves a tail below; the
+    coxa servos, which hang beneath, leave heads above as well.
+
+    One list feeds both the cuts and the fastener solids, so the two cannot
+    drift - and the PCA9685 pattern being drilled 4 mm from where the boards
+    were actually modelled is exactly the drift this prevents.
+    """
+    out = []
+    for hx, hy, yaw in _hips():
+        base = Pos(hx, hy, 0) * Rot(0, 0, yaw + 180)
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                p = (base * Pos(leg.SERVO_SHAFT_OFF + sx * leg.SERVO_HOLE_PITCH_L / 2,
+                                sy * leg.SERVO_HOLE_PITCH_W / 2, 0)).position
+                out.append((p.X, p.Y, leg.SERVO_HOLE_D, "both"))
+    for cx in PCA_CX:
+        for hx in (-PCA_HOLE_Y / 2, PCA_HOLE_Y / 2):
+            for hy in (-PCA_HOLE_X / 2, PCA_HOLE_X / 2):
+                out.append((cx + hx, hy, PCA_SCREW_D, "below"))
+    for sy in (-1, 1):                       # neck socket, front edge
+        out.append((82.0, sy * 8.0, NECK_SCREW_D, "below"))
+    # The dome bolts down into the plate. The plate had no holes for them at
+    # all - make_abdomen drilled its own half of the joint and nothing drilled
+    # the other, so the dome was bolted to solid plastic.
+    for bx in (ABDOMEN_CX + ABDOMEN_A * 0.45, ABDOMEN_CX - ABDOMEN_A * 0.45):
+        for sy in (-1, 1):
+            out.append((bx, sy * ABDOMEN_B * 0.70, ABDOMEN_BOLT_D, "below"))
+    return out
+
+
+def fastener_solids():
+    """The screws, nuts and heads the holes imply, as solids you can clash on."""
+    out = None
+    for x, y, d, side in _plate_holes():
+        r = max(d + 4.0, FASTENER_FLAT) / 2.0
+        if side in ("below", "both"):
+            c = Pos(x, y, -FASTENER_TAIL / 2) * Cylinder(r, FASTENER_TAIL)
+            out = c if out is None else out + c
+        if side in ("above", "both"):
+            c = Pos(x, y, BODY_T + FASTENER_HEAD / 2) * Cylinder(r, FASTENER_HEAD)
+            out = c if out is None else out + c
+    return out
+
+
 def _body_cuts(margin=0.0):
     """Every functional cut in the plate, optionally grown by `margin`.
 
@@ -256,37 +324,31 @@ def _body_cuts(margin=0.0):
         nonlocal cuts
         cuts = c if cuts is None else cuts + c
 
+    # The servo body pockets. +180 so the case points inward, not off the edge.
     for hx, hy, yaw in _hips():
-        # +180 so the servo body points inward, not off the edge.
         base = Pos(hx, hy, 0) * Rot(0, 0, yaw + 180)
         add(base * Pos(leg.SERVO_SHAFT_OFF, 0, 0) * Box(
             leg.SERVO_BODY_L + 2 * leg.CLEAR + 2 * m,
             leg.SERVO_W + 2 * leg.CLEAR + 2 * m, 120))
+        # The servo tab holes are SLOTS, along the body - see leg.servo_cut().
         for sx in (-1, 1):
             for sy in (-1, 1):
                 add(base * Pos(leg.SERVO_SHAFT_OFF + sx * leg.SERVO_HOLE_PITCH_L / 2,
                                sy * leg.SERVO_HOLE_PITCH_W / 2, 0) *
-                    Cylinder(leg.SERVO_HOLE_D / 2 + m, 120))
+                    leg.slot_cut(leg.SERVO_SLOT_L + 2 * m, leg.SERVO_HOLE_D + 2 * m))
 
-    # Two PCA9685s ACROSS the thorax, not along it: the board is 62.5 mm long
-    # and the pinched waist only 48 mm wide, so lengthwise they would hang off
-    # the edge. Turned 90 degrees they sit in the widest part of the body.
-    for cx in (8.0, -18.0):
-        for hx in (-PCA_HOLE_Y / 2, PCA_HOLE_Y / 2):
-            for hy in (-PCA_HOLE_X / 2, PCA_HOLE_X / 2):
-                add(Pos(cx + hx, hy, 0) * Cylinder(PCA_SCREW_D / 2 + m, 60))
-
-    for hx in (-ESP_HOLE_X / 2, ESP_HOLE_X / 2):   # ESP32-S3, thorax front
-        for hy in (-ESP_HOLE_Y / 2, ESP_HOLE_Y / 2):
-            add(Pos(45.0 + hx, hy, 0) * Cylinder(ESP_SCREW_D / 2 + m, 60))
+    # Every other round hole comes from _plate_holes(), which is also what the
+    # fastener solids are built from. Two PCA9685s go ACROSS the thorax, not
+    # along it: the board is 62.2 mm long and the waist only 60 mm wide.
+    for x, y, d, _side in _plate_holes():
+        if d == leg.SERVO_HOLE_D:
+            continue                          # already cut, as a slot
+        add(Pos(x, y, 0) * Cylinder(d / 2 + m, 60))
 
     for bx in BATT_STRAP_X:                  # battery straps, two local pairs
         for sy in (-1, 1):
             add(Pos(bx, sy * BATT_STRAP_Y, 0) * Box(
                 BATT_SLOT_W + 2 * m, BATT_SLOT_L + 2 * m, 60))
-
-    for sy in (-1, 1):                       # neck socket, front edge
-        add(Pos(82.0, sy * 8.0, 0) * Cylinder(NECK_SCREW_D / 2 + m, 60))
 
     if m > 0.0:
         # Bearing faces. These are not cuts, so they only exist in the keepout:
@@ -402,7 +464,10 @@ def check_servo_pads(ring=2.5):
             for sy in (-1, 1):
                 c = (base * Pos(leg.SERVO_SHAFT_OFF + sx * leg.SERVO_HOLE_PITCH_L / 2,
                                 sy * leg.SERVO_HOLE_PITCH_W / 2, BODY_T / 2)).position
-                r = leg.SERVO_HOLE_D / 2 + ring
+                # Probe around the SLOT, not a round hole: the cut is
+                # SERVO_SLOT_L long, so a radius based on the 3.4 mm width
+                # would sample inside material the slot has removed.
+                r = leg.SERVO_SLOT_L / 2 + ring
                 for k in range(8):
                     a = math.pi * k / 4
                     p = Vector(c.X + r * math.cos(a), c.Y + r * math.sin(a), c.Z)
@@ -517,7 +582,8 @@ def make_head():
     part += Pos(0, 0, NECK_H) * Rot(0, HEAD_TILT, 0) * (face - cuts)
 
     # Camera turret, above the face like a spider's median eyes.
-    turret = Box(HEAD_T, 30.0, 24.0, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    turret = Box(HEAD_T, TURRET_W, TURRET_H,
+                 align=(Align.CENTER, Align.CENTER, Align.CENTER))
     turret = _try_fillet(turret, 6.0, Axis.X)
     tcut = Cylinder(CAM_LENS_D / 2, 40, rotation=(0, 90, 0))
     for hy in (-CAM_HOLE_Y / 2, CAM_HOLE_Y / 2):
@@ -541,21 +607,55 @@ def make_head():
 #   name                L      W      H     where
 COMPONENTS = {
     "pca9685":       (62.23, 25.4, 10.1),
-    "esp32s3cam":    (45.0, 27.0, 20.0),
+    "esp32s3cam":    (57.1, 28.1, 7.0),     # Freenove fnk0085: 50.9 PCB + 6.2 of
+                                            # WROOM module overhanging one end
     "lipo2s":        (90.0, 34.0, 20.0),    # 2200 mAh class - see BATTERY note
-    "oled13":        (35.5, 33.5, 5.0),
-    "vl53l0x":       (25.0, 11.0, 3.5),
-    "mpu6050":       (21.2, 15.6, 3.5),
+    "oled13":        (35.4, 33.5, 3.9),
+    "vl53l0x":       (25.4, 17.78, 4.6),    # GY-530. Was modelled 25 x 11 x 3.5 -
+                                            # 6.8 mm too narrow, which is what let
+                                            # it sit inside the OLED undetected
+    "mpu6050":       (21.0, 16.0, 3.3),
     "pcf8574":       (47.63, 15.24, 15.0),
     "ina219":        (25.4, 20.32, 10.0),
     "ubec":          (43.1, 32.3, 12.5),
 }
+
+# Fastener tails. A hole is a SUBTRACTION, so nothing in the interference check
+# can see the screw that goes through it, the nut on the far side, or the head
+# standing proud - and the space under a plate is exactly where both the small
+# I2C boards and every fastener tail want to be. Model them as solids: below the
+# plate for anything bolted down from above, above it for the coxa servo heads.
+FASTENER_TAIL = 6.0      # nut + thread protruding under the plate
+FASTENER_HEAD = 4.0      # cap head standing proud above it
+FASTENER_FLAT = 7.0      # across flats of an M3/M4 nut or cap head
+CLASH_MIN = 5.0          # mm3 - a 1.7 mm cube; see the note in main()
 
 
 def _block(name, loc):
     """One component as a placed box, origin at its centre."""
     l, w, h = COMPONENTS[name]
     return loc * Box(l, w, h)
+
+
+def head_frame():
+    """The FACE's own frame: origin at the face centre, tilted with it.
+
+    This is the same chain make_head() builds the face on, so anything placed
+    through it tilts with the face instead of beside it. The boards used to be
+    positioned in the body frame at a fixed x offset, as though the head stood
+    upright; 15 degrees of nose-down over 22 mm of drop swings the face back
+    5.7 mm, which is how the ToF ended up 0.9 mm inside the slab it was supposed
+    to be bolted behind.
+    """
+    return Pos(HEAD_X, 0, BODY_T + NECK_H) * Rot(0, HEAD_TILT, 0)
+
+
+def _on_face(name, z_local, extra_gap=0.0):
+    """A board lying flat on the BACK of the face, landscape, centred at z."""
+    h = COMPONENTS[name][2]
+    return _block(name, head_frame() *
+                  Pos(-(HEAD_T / 2 + h / 2 + extra_gap), 0, z_local) *
+                  Rot(0, 90, 0) * Rot(0, 0, 90))
 
 
 def make_electronics():
@@ -583,10 +683,19 @@ def make_electronics():
         out.append((f"{name}_femur_servo", fl * body))
         out.append((f"{name}_knee_servo", kl * body))
 
-    # Servo drivers, across the thorax - see the note in make_body(). Spaced so
-    # the 25.4 mm boards clear each other.
-    out.append(("pca9685_A", _block("pca9685", Pos(12.0, 0, BODY_T + 8.0) * Rot(0, 0, 90))))
-    out.append(("pca9685_B", _block("pca9685", Pos(-16.0, 0, BODY_T + 8.0) * Rot(0, 0, 90))))
+    # Servo drivers, across the thorax - see the note in make_body(). Centres
+    # come from PCA_CX, which is now also what gets drilled: the plate used to
+    # be drilled at 8 and -18 while the boards were modelled at 12 and -16, so
+    # bolting them to the real holes would have left 0.6 mm between them.
+    #
+    # PCA_STANDOFF is 8 mm, not the 3 mm that a board resting on the plate
+    # implies. Two things need the height: the middle legs' coxa bolt heads
+    # stand proud right under the board's edge, and the forward battery strap
+    # runs through its slot at x=-28 - directly beneath the rear board, where a
+    # 3 mm gap would mean unbolting a driver to re-tension the pack.
+    zc = BODY_T + PCA_STANDOFF + COMPONENTS["pca9685"][2] / 2
+    for name, cx in (("pca9685_A", PCA_CX[0]), ("pca9685_B", PCA_CX[1])):
+        out.append((name, _block("pca9685", Pos(cx, 0, zc) * Rot(0, 0, 90))))
 
     # The small I2C boards go UNDER the plate. There is 59 mm of ground
     # clearance and the coxa servos hang down in a ring at radius 70-93, so the
@@ -597,35 +706,70 @@ def make_electronics():
     # model assumes - and the battery now occupies x -107..-17, so x=0 is the
     # one place under the plate that is both central and free.
     out.append(("mpu6050", _block("mpu6050", Pos(0.0, 0.0, -3.0))))
-    # The expander moves off the battery and out to the side, still under the
-    # plate, where the leg wiring arrives.
-    out.append(("pcf8574", _block("pcf8574", Pos(12.0, -30.0, -9.0))))
+    # The expander sits athwart in the forward belly. It was at (12, -30), which
+    # put it straight under three of the rear driver's four mounting screws with
+    # 1.5 mm of air - no solid-on-solid overlap, so the old interference check
+    # saw nothing, but the standoff nuts would have landed on the board.
+    out.append(("pcf8574", _block("pcf8574", Pos(30.0, 24.0, -8.0) * Rot(0, 0, 90))))
 
     # Power, inside the abdomen dome, with the shunt next to the pack.
     out.append(("lipo2s", _block("lipo2s", Pos(BATT_X, 0, BATT_Z))))
-    # Both UBECs side by side in the dome. At 43.1 x 32.3 they are the largest
-    # things in there; the ellipsoid is 70 mm wide at their 12.5 mm top face, so
-    # +-17 mm centres is what clears the wall.
-    for sy in (-1, 1):
-        out.append((f"ubec_{'L' if sy > 0 else 'R'}",
-                    _block("ubec", Pos(ABDOMEN_CX, sy * 16.5, BODY_T + 6.5))))
-    # The shunt does NOT go in the dome: the two UBECs take 43 of its 85 mm of
-    # inner length, and anywhere else in there either fouls them or runs out
-    # through the ellipsoid's taper. Under the plate beside the IMU instead,
-    # close enough to the pack's forward leads to keep the sense wiring short.
-    out.append(("ina219", _block("ina219", Pos(0.0, 26.0, -6.0))))
+    # ONE UBEC in the dome, not two. Side by side at +-16.5 they cleared each
+    # other by 0.7 mm and each pushed a corner through the shell, because the
+    # ellipsoid's inner half-width falls from 32.5 mm at the centre to 29.5 mm
+    # at the boards' fore and aft ends while a 32.3 mm board needs 32.3 mm all
+    # the way along. Tandem needs 86 mm of an 85 mm cavity. Raising ABDOMEN_B
+    # would eat the 15 mm the rear legs need to sweep past.
+    out.append(("ubec_L", _block("ubec", Pos(ABDOMEN_CX, 0.0, BODY_T + 6.5))))
+    # UBEC #2 goes athwart in the forward belly instead, mirroring the expander.
+    out.append(("ubec_R", _block("ubec", Pos(30.0, -24.0, -11.5) * Rot(0, 0, 90))))
+    # The shunt does NOT go in the dome, and not in the y = 26..36 band on either
+    # flank either: all eight driver screws land on y = +-27.94 and the middle
+    # legs' inboard coxa nuts reach y = 31.7, so that whole strip is fastener.
+    # Forward on the centreline, ahead of the IMU, is clear.
+    out.append(("ina219", _block("ina219", Pos(62.0, 0.0, -7.0))))
 
-    # On the head. The ESP32-S3 CAM board carries the camera itself, so it goes
-    # in the turret rather than on the thorax - the lens cannot be anywhere else.
-    head_x = 82.0 - NECK_FOOT_L + NECK_T
-    head_face = Rot(0, 90 + HEAD_TILT, 0)
-    out.append(("esp32s3cam", _block("esp32s3cam",
-                Pos(head_x - 16.0, 0, BODY_T + NECK_H + HEAD_H / 2 + CAM_RISE) * head_face)))
-    out.append(("oled13", _block("oled13",
-                Pos(head_x - 8.5, 0, BODY_T + NECK_H + LCD_Z) * head_face)))
-    out.append(("vl53l0x", _block("vl53l0x",
-                Pos(head_x - 11.0, 0, BODY_T + NECK_H + PROX_Z) * head_face)))
+    # On the head, placed in the FACE's frame so they tilt with it. Both are
+    # LANDSCAPE: the OLED window (30 across Y by 17 in Z) and its 30.5 mm hole
+    # pitch describe a board lying that way, as does the ToF's 20 mm pitch, but
+    # the blocks were modelled turned 90 degrees from the features that mount
+    # them. The features are right, so the blocks were what moved.
+    out.append(("oled13", _on_face("oled13", LCD_Z)))
+    out.append(("vl53l0x", _on_face("vl53l0x", PROX_Z)))
+    # The camera board rides behind the turret, which is where the lens has to
+    # be. It is a 57.1 mm board on a 24 mm turret - see check_head_mounted().
+    out.append(("esp32s3cam", _block("esp32s3cam", head_frame() *
+                Pos(-(HEAD_T / 2 + COMPONENTS["esp32s3cam"][2] / 2), 0,
+                    HEAD_H / 2 + CAM_RISE) * Rot(0, 90, 0) * Rot(0, 0, 90))))
     return out
+
+
+# Which panel each head board bolts to, and how big that panel is. A board
+# BEHIND a panel is correct - that is how a face-mounted sensor works - so a
+# bounding-box test against the whole head is useless here and flags the ToF
+# for sitting where it belongs. What matters is whether the board's footprint
+# fits the panel it screws to.
+FACE_PANELS = {
+    "oled13":     ("face", HEAD_W, HEAD_H),
+    "vl53l0x":    ("face", HEAD_W, HEAD_H),
+    "esp32s3cam": ("turret", TURRET_W, TURRET_H),
+}
+
+
+def check_head_mounted(margin=2.0):
+    """Does each head board's footprint fit the panel it bolts to?
+
+    Overlap checks cannot catch a board that misses its bracket entirely: two
+    solids that do not touch look exactly like a part correctly mounted beside
+    it. Compare footprints against panels instead.
+    """
+    bad = []
+    for name, (panel, pw, ph) in FACE_PANELS.items():
+        l, w, _h = COMPONENTS[name]         # l across the panel, w up it
+        over = max(l - (pw - 2 * margin), w - (ph - 2 * margin))
+        if over > 0.0:
+            bad.append((name, panel, l, w, pw, ph, over))
+    return bad
 
 
 # --- assembly ----------------------------------------------------------------
@@ -667,7 +811,7 @@ def knee_peak():
 def make_assembly(electronics=True):
     parts = [("body", make_body()),
              ("abdomen", Pos(0, 0, BODY_T) * make_abdomen()),
-             ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
+             ("head", Pos(HEAD_X, 0, BODY_T) * make_head())]
     if electronics:
         parts += make_electronics()
     a = stance_angles()
@@ -694,6 +838,13 @@ def main():
             print(f"  hip ({hx:.0f}, {hy:.0f}) hole ({sx:+d}, {sy:+d})")
     else:
         print("all 24 coxa bolt holes ringed by plate")
+
+    unmounted = check_head_mounted()
+    for name, panel, l, w, pw, ph, over in unmounted:
+        print(f"WARNING: {name} is {l:.1f} x {w:.1f} on a {pw:.0f} x {ph:.0f} "
+              f"{panel} - overhangs by {over:.1f} mm")
+    if not unmounted:
+        print("every head board fits the panel it bolts to")
 
     body, head, abdomen = make_body(), make_head(), make_abdomen()
     missed = check_voids_cut(body)
@@ -738,7 +889,7 @@ def main():
     print("\ncomponent interference")
     comps = make_electronics()
     structure = [("body", body), ("abdomen", Pos(0, 0, BODY_T) * abdomen),
-                 ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
+                 ("head", Pos(HEAD_X, 0, BODY_T) * make_head())]
     clashes = 0
     for i, (na, pa) in enumerate(comps):
         for nb, pb in structure + comps[i + 1:]:
@@ -746,11 +897,11 @@ def main():
                 ov = (pa & pb).volume
             except Exception:
                 continue
-            if ov > 60.0:                 # ignore slivers; 60 mm3 is a 4 mm cube
-                print(f"  {na} <-> {nb}: {ov/1000:.2f} cm3")
+            if ov > CLASH_MIN:
+                print(f"  {na} <-> {nb}: {ov/1000:.3f} cm3")
                 clashes += 1
-    print(f"  {clashes} interference(s) over 0.06 cm3"
-          if clashes else "  none over 0.06 cm3")
+    print(f"  {clashes} interference(s) over {CLASH_MIN/1000:.3f} cm3"
+          if clashes else f"  none over {CLASH_MIN/1000:.3f} cm3")
 
     in_dome = sum(p.volume for n, p in comps if n.startswith('ubec'))
     cavity = ((4/3) * math.pi * (ABDOMEN_A - ABDOMEN_WALL) *

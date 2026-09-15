@@ -43,14 +43,21 @@ OUT = os.path.join(ROOT, "CAD", "generated")
 
 # --- Servo envelope ----------------------------------------------------------
 # The user's own model (CAD/export/Assemblage1 - SERVO-1.STL) is a simplified
-# solid, 54.5 x 46.5 x 20.0 mm with no mounting holes, so the hole pattern below
-# is the published MG996R one. VERIFY IT WITH CALIPERS before printing six legs.
+# solid, 54.5 x 46.5 x 20.0 mm with no mounting holes, so the pattern below comes
+# from the published MG996R figures rather than from anything measurable. That is
+# exactly why the tab holes are slotted - see SERVO_HOLE_D.
 SERVO_BODY_L = 40.7      # body alone, between the tabs
 SERVO_W = 20.0           # body width (thin axis)
 SERVO_H = 46.5           # along the shaft, from the user's model
 SERVO_SHAFT_OFF = 10.0   # shaft axis from body centre, along the length
-SERVO_HOLE_D = 4.3       # M4 clearance
-SERVO_HOLE_PITCH_L = 49.5
+# The tab holes are SLOTS, not round holes, and that is not a nicety. MG996R
+# clones put the long pitch anywhere from 47.8 to 49.5 mm depending on who made
+# them; a 4.3 mm round hole on a 49.5 nominal only reaches down to 48.85, so a
+# servo at the bottom of that spread simply will not bolt on. 5.1 mm of slot on
+# a 48.65 nominal covers the whole range with M3, which is what the tabs take.
+SERVO_HOLE_D = 3.4       # M3 clearance - slot WIDTH
+SERVO_SLOT_L = 5.1       # slot LENGTH, along the servo body
+SERVO_HOLE_PITCH_L = 48.65
 SERVO_HOLE_PITCH_W = 10.0
 
 # --- Horn interface ----------------------------------------------------------
@@ -147,7 +154,18 @@ def servo_cut(through=120.0):
         for sy in (-1, 1):
             cut += Pos(cx + sx * SERVO_HOLE_PITCH_L / 2,
                        sy * SERVO_HOLE_PITCH_W / 2, 0) * \
-                Cylinder(SERVO_HOLE_D / 2, through)
+                slot_cut(SERVO_SLOT_L, SERVO_HOLE_D, through)
+    return cut
+
+
+def slot_cut(length, width, through=120.0):
+    """An obround slot, `length` along X, `width` across, axis +Z."""
+    span = length - width
+    if span <= 1e-6:                       # degenerate: it is just a hole
+        return Cylinder(width / 2, through)
+    cut = Box(span, width, through)
+    for sx in (-1, 1):
+        cut += Pos(sx * span / 2, 0, 0) * Cylinder(width / 2, through)
     return cut
 
 
