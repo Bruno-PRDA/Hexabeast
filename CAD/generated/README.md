@@ -6,14 +6,15 @@ by hand — regenerate.
 | Part | Spans | Printed (30 % infill) |
 |------|-------|-----------------------|
 | `coxa_link` | coxa axis -> femur servo axis, 25 mm | ~5.3 g |
-| `femur_link` | femur axis -> knee servo axis, 59 mm | ~7.0 g |
-| `tibia` | knee axis -> foot tip, 109 mm | ~8.2 g |
-| `body` | six coxa mounts, electronics, battery, mast socket | ~67 g |
+| `femur_link` | femur axis -> knee servo axis, 59 mm | ~6.5 g |
+| `tibia` | knee axis -> foot tip, 109 mm | ~8.6 g |
+| `body` | six coxa mounts, electronics, battery, mast socket | ~70 g |
+| `abdomen` | dome over the rear, houses the UBECs | ~12 g |
 | `head` | LCD face, proximity sensor and camera, tilted 15 deg down | ~19 g |
 | `assembly.stl` | the lot at stance pose - for viewing, not printing | - |
 
-Print six each of the three leg parts, one body, one mast: **205 g** of
-plastic. With 18 servos and the battery that is **1.51 kg** all-up.
+Print six each of the three leg parts, one body, one dome, one head: **223 g**
+of plastic. With 18 servos and the battery that is **1.53 kg** all-up.
 
 `.step` imports into SolidWorks as a solid body — editable geometry, but no
 feature tree. `.stl` goes straight to the slicer.
@@ -34,13 +35,29 @@ put the camera at 62 mm, which would have had legs sweeping through the shot
 every stride. The camera sits at 115 mm, clearing the worst case by 35 mm; the LCD face is
 at 86 mm and the proximity sensor at 60 mm.
 
-**Styling is packaging, not decoration.** The body is overlapping circular
-lobes down the centreline - narrow head, broad thorax across the leg roots,
-pinched waist, bulbous abdomen - and each lobe is sized by what sits under
-it: the abdomen by the LiPo, the thorax by the hip spacing. Smoothness comes
-from spacing the lobes 7 mm apart rather than from filleting, because
-OpenCASCADE refused to round this outline at any radius and one awkward
-cusp rejects the whole batch.
+**Styling is packaging, not decoration.** The plate is a faceted profile down
+the centreline, drawn out to a point at each hip and lightened with triangular
+voids; the tibia and femur are Warren trusses between two edge rails. Every
+station of the profile is set by what sits under it - the tail by where the
+dome's wall ring lands, the waist by the servo driver mounted across it, the
+thorax by the hip spacing - so the outline follows the packaging rather than
+being drawn over it.
+
+The voids are not placed by eye. A triangular lattice proposes candidates and
+each has to earn its place: miss every hole, cutout and bearing face by 4 mm,
+and lie wholly inside the outline eroded by 6.5 mm. The lattice's own phase is
+swept, which matters more than it sounds like it should - across the 16 offsets
+tried, the number that fits runs from 0 to 10 per half-plate. 20 voids survive,
+taking 22 cm2 out of the plate, and adding a component later just makes some of
+them vanish.
+
+**A hole that doesn't cut looks exactly like a hole that does.** build123d
+extrudes a face along its own normal, so a clockwise polygon builds its prism
+*below* the plane - subtract it and nothing is removed. Half the truss bays
+alternate winding by construction and every mirrored void flips it again, so
+most of them were quietly doing nothing and the parts still rendered perfectly.
+Winding is now normalised in one place, and both generators probe for material
+where each void should be.
 
 **Each foot lands 11.9 mm off the ideal.** The femur servo bolts to a wall, so
 its shaft cannot sit on the leg's centre plane - the offset is the servo's half
@@ -55,4 +72,5 @@ rotationally symmetric and balanced. The payoff is that all six legs are the
 **same printed part**, not mirrored pairs.
 
 Print flat on the bed, no supports needed. Three perimeters minimum — the
-walls are 3 mm, which is what carries the bending load at the coxa joint.
+walls are 3 mm, and with the middle of each link trussed out it is the rails
+that carry the bending load.

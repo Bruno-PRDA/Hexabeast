@@ -32,8 +32,8 @@ import math
 import os
 import sys
 
-from build123d import (Align, Box, Cylinder, Pos, Rot, Vector, export_step,
-                       export_stl)
+from build123d import (Align, Box, Cone, Cylinder, Polygon, Pos, Rot, Vector,
+                       export_step, export_stl, extrude)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "ros2_ws", "src", "hexapod_gait"))
@@ -67,6 +67,71 @@ CLEAR = 0.4
 FOOT_D = 16.0
 FEMUR_AXIS_Z = 22.0      # femur axis above the coxa horn face
 FOOT_DROP = 6.0
+
+# --- Skeletal styling --------------------------------------------------------
+# Triangular voids between two edge rails: a Warren truss. This is where the
+# machined-kit look comes from, and it is not only a look - a plate in bending
+# carries almost nothing near its neutral axis, so the middle is the cheapest
+# material on the robot to delete. On the tibia it is also mass at the far end
+# of the longest lever, which the knee servo pays for on every single step.
+RAIL = 4.0               # material left along each edge, inboard of the rib
+TRUSS_WEB = 3.6          # material left between neighbouring voids
+TRUSS_MIN = 7.0          # skip anything smaller - it is a stress riser, not a hole
+
+
+def ccw(pts):
+    """The same polygon, guaranteed counter-clockwise.
+
+    build123d extrudes a face along its OWN normal, and a clockwise polygon's
+    normal points at -Z: `extrude(poly, amount=h)` then quietly builds the prism
+    below the plane instead of above it. Subtract one of those and nothing is
+    removed - the part still renders perfectly, with a hole missing. Half the
+    truss bays alternate winding by construction, and every mirrored copy flips
+    it again, so normalise here rather than trusting the point order at each
+    call site.
+    """
+    a = sum(pts[i][0] * pts[(i + 1) % len(pts)][1] -
+            pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts)))
+    return list(pts) if a > 0.0 else list(reversed(pts))
+
+
+def truss_voids(xa, xb, half_at, pitch=22.0, thick=120.0):
+    """Alternating triangular voids in a plate lying in XY, spanning xa..xb.
+
+    `half_at(x)` gives the plate's half-width there, so a tapered beam gets
+    tapered voids for free. Each void is inset RAIL from both edges and
+    TRUSS_WEB from its neighbours; what is left between two voids pointing
+    opposite ways is a diagonal web.
+
+    Returns None when nothing fits. That is the normal outcome near a tapering
+    tip, and it is why the caller never has to know where the beam gets too
+    narrow - the filter finds out instead of the printer.
+    """
+    span = xb - xa
+    if span < TRUSS_MIN:
+        return None
+    n = max(1, int(round(span / pitch)))
+    p = span / n
+    out = None
+    for k in range(n):
+        x0 = xa + k * p + TRUSS_WEB / 2
+        x1 = xa + (k + 1) * p - TRUSS_WEB / 2
+        if x1 - x0 < TRUSS_MIN:
+            continue
+        xm = (x0 + x1) / 2
+        h0, h1, hm = (half_at(x) - RAIL for x in (x0, x1, xm))
+        if min(h0, h1, hm) < TRUSS_MIN / 2:
+            continue
+        s = 1.0 if k % 2 == 0 else -1.0     # base on alternating rails
+        tri = Polygon(*ccw([(x0, s * h0), (x1, s * h1), (xm, -s * hm)]), align=None)
+        v = Pos(0, 0, -thick / 2) * extrude(tri, amount=thick)
+        bb = v.bounding_box()
+        if not (bb.min.Z < 0.0 < bb.max.Z):
+            raise AssertionError(
+                f"truss void at x={xm:.1f} spans z {bb.min.Z:.1f}..{bb.max.Z:.1f} "
+                "and would miss the plate entirely - winding is wrong")
+        out = v if out is None else out + v
+    return out
 
 
 def servo_cut(through=120.0):
@@ -152,27 +217,33 @@ def make_femur_link(d=None):
     """
     d = d if d is not None else cfg.FEMUR * 1000
     width = max(SERVO_W + 2 * WALL, HORN_BOSS_D)
+    half = width / 2
     length = d + SERVO_SHAFT_OFF + SERVO_HOLE_PITCH_L / 2 + 8 + HORN_BOSS_D / 2
 
-    # Waisted rather than a plain slab: full width at both ends where the horn
-    # and the servo need material, pinched in the middle where the bending
-    # moment is lowest. Costs nothing, and it is most of what makes a leg read
-    # as a leg rather than a bracket.
-    part = None
-    n = 10
-    for k in range(n):
-        x0, x1 = length * k / n, length * (k + 1) / n
-        u = (x0 + x1) / 2 / length
-        w = width * (1.0 - 0.30 * math.sin(math.pi * u))
-        seg = Pos((x0 + x1) / 2 - HORN_BOSS_D / 2, 0, 0) * Box(
-            x1 - x0 + 0.02, w, PLATE, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        part = seg if part is None else part + seg
+    # Straight-sided, not waisted. An earlier version pinched the middle to save
+    # mass; the truss below now does that job, and it does it better - a waist
+    # narrows the very rails that carry the bending, whereas a void removes only
+    # the part that was carrying nothing. Full width also leaves room for a void
+    # big enough to see, which a pinched middle did not.
+    part = Pos(length / 2 - HORN_BOSS_D / 2, 0, 0) * Box(
+        length, width, PLATE, align=(Align.CENTER, Align.CENTER, Align.MIN))
     part += horn_boss(PLATE)
     # Side rails: a flat plate this long is weak in bending about Y, and stiffness
-    # here costs a gram.
+    # here costs a gram. With the middle cut out they are doing most of the work.
     for sy in (-1, 1):
-        part += Pos(d / 2, sy * (width / 2 - WALL / 2), PLATE) * Box(
+        part += Pos(d / 2, sy * (half - WALL / 2), PLATE) * Box(
             d, WALL, 7.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+    # The only free span on a femur this short: between the horn boss and the
+    # servo's forward pair of bolt holes. 59 mm of link carrying a 40.7 mm servo
+    # does not leave much, and pretending otherwise would put a hole through a
+    # mounting boss.
+    voids = truss_voids(HORN_BOSS_D / 2 + 4.0,
+                        d + SERVO_SHAFT_OFF - SERVO_HOLE_PITCH_L / 2
+                        - SERVO_HOLE_D / 2 - 4.0,
+                        lambda _x: half)
+    if voids is not None:
+        part -= voids
     return part - (Pos(d, 0, 0) * servo_cut()) - horn_cut()
 
 
@@ -183,22 +254,57 @@ def make_tibia(d=None):
     what the knee servo pays for on every step.
     """
     d = d if d is not None else cfg.TIBIA * 1000
-    part = horn_boss(PLATE)
     w0 = max(SERVO_W + 2 * WALL, HORN_BOSS_D)
-    n = 12
+
+    def half_at(x):
+        """Half-width along the blade: taper, then flare back into the foot.
+
+        The old profile ran straight to a narrow tip and then stuck a 16 mm
+        circle on the end, which read as a lollipop. Easing out to the pad
+        diameter from 70 % of the way down - where the taper happens to pass
+        through 16 mm anyway - means the blade simply runs parallel into its
+        own foot, with no step to see. It also keeps the last truss bay: the
+        rails stop converging, so there is still room between them.
+        """
+        u = min(max(x / d, 0.0), 1.0)
+        w = w0 * (1.0 - 0.55 * u)
+        t = max(0.0, (u - 0.70) / 0.30)
+        w += (FOOT_D - w) * (t * t * (3.0 - 2.0 * t))
+        return w / 2
+
+    part = horn_boss(PLATE)
+    n = 18
     for i in range(n):
         x0, x1 = d * i / n, d * (i + 1) / n
-        w = w0 * (1.0 - 0.55 * (x0 / d))
-        part += Pos((x0 + x1) / 2, 0, PLATE / 2) * Box(
-            x1 - x0 + 0.02, w, PLATE,
+        xm = (x0 + x1) / 2
+        h = half_at(xm)
+        part += Pos(xm, 0, PLATE / 2) * Box(
+            x1 - x0 + 0.02, 2 * h, PLATE,
             align=(Align.CENTER, Align.CENTER, Align.CENTER))
-    # Spine along the top, for stiffness where the moment is highest.
-    part += Pos(d * 0.35, 0, PLATE) * Box(
-        d * 0.7, WALL, 6.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    # Foot pad; rubber goes on this.
-    part += Pos(d, 0, PLATE / 2 - FOOT_DROP / 2) * Cylinder(
-        FOOT_D / 2, PLATE + FOOT_DROP,
-        align=(Align.CENTER, Align.CENTER, Align.CENTER))
+        # Rails at the EDGES, not a spine down the middle. A centre rib is the
+        # right answer for a solid blade and exactly the wrong one for a trussed
+        # blade - it stands in the space the voids need, and it stiffens the one
+        # line of material that was already redundant.
+        for sy in (-1, 1):
+            part += Pos(xm, sy * (h - WALL / 2), PLATE) * Box(
+                x1 - x0 + 0.02, WALL, 6.0,
+                align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+    # Tighter pitch than the femur: five short bays stiffen a long blade far
+    # better than three long ones, for a tenth of a gram more plastic. The last
+    # bay drops out on its own where the taper runs the rails together.
+    voids = truss_voids(HORN_BOSS_D / 2 + 4.0, d * 0.86, half_at, pitch=14.0)
+    if voids is not None:
+        part -= voids
+
+    # Foot: a tapered spur rather than a puck, so the blade runs out into it.
+    # The flat at the bottom is still FOOT_D * 0.62 across - enough to glue a
+    # rubber cap to, which is what robot_config's 8 mm contact radius assumes.
+    part += Pos(d, 0, PLATE / 2) * Cylinder(
+        FOOT_D / 2, PLATE, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    part += Pos(d, 0, -FOOT_DROP) * Cone(
+        FOOT_D / 2 * 0.62, FOOT_D / 2, FOOT_DROP,
+        align=(Align.CENTER, Align.CENTER, Align.MIN))
     return part - horn_cut()
 
 

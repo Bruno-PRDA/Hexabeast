@@ -13,20 +13,23 @@ offsets - wall thicknesses, servo heights, horn faces - and then asking where
 each foot actually lands. The kinematic model assumes an ideal planar leg, so
 any gap between the two is a gap between the robot and its own simulator.
 
-STYLING. The body is overlapping circular lobes down the centreline rather than
-a rectangle, which buys a spider's silhouette almost for free: narrow at the
-head, broad across the leg roots, pinched at the waist, bulbous behind. Each
-lobe still earns its place - the abdomen is sized by the LiPo under it, the
-thorax by the hip spacing - so the shape follows the packaging instead of being
-laid on top of it.
+STYLING. The plate is a faceted profile - straight edges between stations down
+the centreline - drawn out to a point at each hip and lightened with triangular
+voids. It used to be a union of circular lobes, which gave a spider's outline
+but rendered as a pile of bubbles; facets, points and voids are what make a
+machined-looking chassis, and they are what the reference robot has.
+
+Every station still earns its place - the abdomen is sized by the dome over it,
+the waist by the servo driver that has to clear it, the nose by the neck - so
+the shape follows the packaging rather than being laid on top of it.
 """
 import argparse
 import math
 import os
 import sys
 
-from build123d import (Align, Axis, Box, Cylinder, Pos, Rot, Sphere, export_step,
-                       export_stl, fillet, scale)
+from build123d import (Align, Axis, Box, Cylinder, Polygon, Pos, Rot, Sphere,
+                       Vector, export_step, export_stl, extrude, fillet, scale)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "ros2_ws", "src", "hexapod_gait"))
@@ -39,25 +42,66 @@ OUT = os.path.join(ROOT, "CAD", "generated")
 # --- Body --------------------------------------------------------------------
 BODY_T = 5.0
 HIP_PAD_R = 32.0
-EDGE_FILLET = 7.0        # softens the cusps where lobes meet
+HIP_PAD_N = 8            # facets per hip pad - a disc reads as a bubble
 
-# (x, y, radius) down the centreline, front to back.
+# (x, half-width) down the body, front to back, with straight facets between.
 #
-# The radii are not free. Two circles that barely overlap meet at a razor cusp,
-# and no fillet fits into it - the first attempt had the middle hip pads
-# overlapping the thorax by about 1 mm and the whole rounding operation failed.
-# Every lobe here overlaps its neighbours, and every hip pad overlaps the spine,
-# by at least 8 mm. That is what makes the outline roundable.
-BODY_LOBES = [
-    (86.0, 0.0, 24.0),    # head end - the neck bolts here
-    (58.0, 0.0, 40.0),
-    (22.0, 0.0, 54.0),    # thorax, widest where the front legs load it
-    (-8.0, 0.0, 46.0),
-    (-32.0, 0.0, 24.0),   # waist - the pinch is what reads as a spider
-    (-58.0, 0.0, 42.0),
-    (-82.0, 0.0, 46.0),   # abdomen, sized by the 2S LiPo beneath it
-    (-108.0, 0.0, 30.0),  # abdomen tip
+# These are not free numbers. Working back to front: the tail has to reach the
+# x=-119 point where the dome's wall ring lands; the abdomen has to stay wider
+# than that ellipse all the way round; the WAIST is 30 rather than the 24 it
+# would like to be, because the rear PCA9685 is mounted across the body and its
+# outer mounting holes sit at y=27.9 with the board itself overhanging to 31.1;
+# the thorax is set by the hip spacing; the nose has to carry the neck foot.
+# Anything narrower than this list is a hole through something.
+BODY_PROFILE = [
+    (96.0, 18.0),     # nose - blunt, the neck bolts at x=82
+    (86.0, 24.0),
+    (58.0, 40.0),
+    (22.0, 54.0),     # thorax, widest where the front legs load it
+    (-8.0, 46.0),
+    (-32.0, 30.0),    # waist - the pinch is what still reads as a spider
+    (-46.0, 40.0),    # rear coxa pad: a straight facet from the waist to the
+                      # abdomen cuts inside the arc it replaced and clipped the
+                      # rear servos' inboard bolt holes. check_servo_pads() found
+                      # it; this station is what it takes to ring them.
+    (-58.0, 42.0),
+    (-82.0, 46.0),    # abdomen, outside the dome's 40 mm half-width
+    (-108.0, 34.0),
+    (-126.0, 14.0),   # tail
 ]
+
+# Eroding a polygon properly means offsetting every edge along its own normal.
+# Scaling the half-widths instead is only exact where an edge runs along x; on a
+# sloped facet it erodes by cos(slope) of what was asked. So over-erode by the
+# steepest facet in the profile - derived, not typed, because the number changed
+# the moment a station was added and a stale constant here leaves a knife edge
+# at the tail. Erosion only feeds the void filter, so erring long costs a void.
+PROFILE_ERODE_K = max(
+    1.0 / math.cos(math.atan2(abs(h1 - h0), abs(x1 - x0)))
+    for (x0, h0), (x1, h1) in zip(BODY_PROFILE, BODY_PROFILE[1:]))
+
+# --- Skeletal styling --------------------------------------------------------
+# The plate is lightened the same way the leg links are: triangular voids inside
+# a continuous rim. Placing them by eye on a lobed outline crossed by six servo
+# cutouts, four bolt patterns, two strap slots and a dome footprint is how you
+# put a hole through something you forgot about - so they are NOT placed by eye.
+# A regular lattice proposes candidates and each one has to earn its place: it
+# must miss every functional feature by VOID_KEEPOUT and lie wholly inside the
+# outline eroded by VOID_RIM. Whatever survives is correct by construction, and
+# adding a new component later just makes some voids disappear.
+VOID_SIDE = 16.0         # triangle side
+VOID_WEB = 6.0           # material between neighbouring voids
+VOID_RIM = 6.5           # material left at the outline
+VOID_KEEPOUT = 4.0       # clearance from any hole, cutout or bearing face
+VOID_PHASES = 4          # lattice offsets tried; the one that fits most wins
+
+# Hip arms. Drawing each pad out to a point along its own leg direction turns
+# the plate into a star. They sit under the coxa link, which swings above the
+# plate, so the extra reach cannot foul anything. ARM_HALF has to stay wide
+# enough to ring the servo's outboard bolt pair, which lands 14.75 mm out from
+# the coxa axis at +-5 mm across - check_servo_pads() in main() proves it does.
+ARM_R = 42.0             # arm tip, from the coxa axis
+ARM_HALF = 20.0          # arm half-width at the coxa axis
 
 # --- Electronics footprints --------------------------------------------------
 PCA_HOLE_X, PCA_HOLE_Y = 55.88, 19.05  # 2.2 x 0.75 inch - the board is imperial
@@ -155,43 +199,74 @@ def _try_fillet(part, radius, axis=Axis.Z):
     return part
 
 
-def _spine(step=7.0):
-    """BODY_LOBES interpolated into closely-spaced circles.
+def _ngon(r, n, phase_deg):
+    """Regular n-gon of circumradius r, first vertex at `phase_deg`."""
+    return [(r * math.cos(math.radians(phase_deg + 360.0 * k / n)),
+             r * math.sin(math.radians(phase_deg + 360.0 * k / n))) for k in range(n)]
 
-    Smoothness comes from spacing, not from filleting. OpenCASCADE would not
-    round this outline at any radius - a single awkward cusp rejects the whole
-    batch, and max_fillet could not even converge - so the shape is made smooth
-    by construction instead. Circles 7 mm apart with a smoothstepped radius
-    leave cusps too shallow to see, and it cannot fail.
+
+def _plate_solid(shrink=0.0, arms=True):
+    """The plate's outline as a solid, optionally eroded by `shrink`.
+
+    The eroded copy is what the void filter tests against: "wholly inside the
+    plate less 6.5 mm" IS the rim condition, so asking it this way measures the
+    rim against the real outline instead of against an offset worked out by hand.
+
+    Arms are left out of the eroded copy on purpose. Eroding a sharp point
+    correctly means pulling its tip back by shrink/sin(half-angle) - 2.3x here -
+    and getting that subtly wrong puts a void in a 3 mm spike. Dropping them
+    instead just means no voids in the arms, which is where they were never
+    wanted.
     """
-    out = []
-    for (x0, y0, r0), (x1, y1, r1) in zip(BODY_LOBES, BODY_LOBES[1:]):
-        span = math.dist((x0, y0), (x1, y1))
-        n = max(1, int(span / step))
-        for i in range(n):
-            u = i / n
-            s = u * u * (3.0 - 2.0 * u)          # smoothstep, so radius eases
-            out.append((x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, r0 + (r1 - r0) * s))
-    out.append(BODY_LOBES[-1])
-    return out
+    k = PROFILE_ERODE_K * shrink
+    stations = [(x, hw - k) for x, hw in BODY_PROFILE if hw - k > 0.0]
+    if not stations:
+        raise ValueError("erosion consumed the whole plate")
+    # Front and back are faces too: pull the end stations in along x as well.
+    stations[0] = (stations[0][0] - k, stations[0][1])
+    stations[-1] = (stations[-1][0] + k, stations[-1][1])
+
+    pts = [(x, hw) for x, hw in stations] + [(x, -hw) for x, hw in reversed(stations)]
+    part = extrude(Polygon(*leg.ccw(pts), align=None), amount=BODY_T)
+
+    for hx, hy, yaw in _hips():
+        # Phase the octagon so a FLAT faces outward along the leg, which is the
+        # edge the arm grows out of.
+        pad = _ngon(HIP_PAD_R - 1.082 * shrink, HIP_PAD_N, yaw + 180.0 / HIP_PAD_N)
+        part += Pos(hx, hy, 0) * extrude(Polygon(*leg.ccw(pad), align=None), amount=BODY_T)
+        if arms:
+            tri = Polygon(*leg.ccw([(0.0, ARM_HALF), (0.0, -ARM_HALF), (ARM_R, 0.0)]),
+                          align=None)
+            part += Pos(hx, hy, 0) * Rot(0, 0, yaw) * extrude(tri, amount=BODY_T)
+    return part
 
 
-def make_body():
-    """Body plate: six coxa mounts, electronics, battery, neck socket."""
-    part = None
-    for x, y, r in _spine():
-        lobe = Pos(x, y, 0) * Cylinder(r, BODY_T,
-                                       align=(Align.CENTER, Align.CENTER, Align.MIN))
-        part = lobe if part is None else part + lobe
-    for hx, hy, _yaw in _hips():
-        part += Pos(hx, hy, 0) * Cylinder(
-            HIP_PAD_R, BODY_T, align=(Align.CENTER, Align.CENTER, Align.MIN))
+def _body_cuts(margin=0.0):
+    """Every functional cut in the plate, optionally grown by `margin`.
 
+    One function serves twice: at margin 0 it IS the cut list, and at
+    VOID_KEEPOUT it is the no-go region for lightening. They cannot drift apart,
+    which is the whole point - a keepout maintained separately from the cuts it
+    is meant to protect is a keepout that silently goes stale.
+    """
+    m = margin
     cuts = None
+
+    def add(c):
+        nonlocal cuts
+        cuts = c if cuts is None else cuts + c
+
     for hx, hy, yaw in _hips():
         # +180 so the servo body points inward, not off the edge.
-        c = Pos(hx, hy, 0) * Rot(0, 0, yaw + 180) * leg.servo_cut()
-        cuts = c if cuts is None else cuts + c
+        base = Pos(hx, hy, 0) * Rot(0, 0, yaw + 180)
+        add(base * Pos(leg.SERVO_SHAFT_OFF, 0, 0) * Box(
+            leg.SERVO_BODY_L + 2 * leg.CLEAR + 2 * m,
+            leg.SERVO_W + 2 * leg.CLEAR + 2 * m, 120))
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                add(base * Pos(leg.SERVO_SHAFT_OFF + sx * leg.SERVO_HOLE_PITCH_L / 2,
+                               sy * leg.SERVO_HOLE_PITCH_W / 2, 0) *
+                    Cylinder(leg.SERVO_HOLE_D / 2 + m, 120))
 
     # Two PCA9685s ACROSS the thorax, not along it: the board is 62.5 mm long
     # and the pinched waist only 48 mm wide, so lengthwise they would hang off
@@ -199,20 +274,171 @@ def make_body():
     for cx in (8.0, -18.0):
         for hx in (-PCA_HOLE_Y / 2, PCA_HOLE_Y / 2):
             for hy in (-PCA_HOLE_X / 2, PCA_HOLE_X / 2):
-                cuts += Pos(cx + hx, hy, 0) * Cylinder(PCA_SCREW_D / 2, 60)
+                add(Pos(cx + hx, hy, 0) * Cylinder(PCA_SCREW_D / 2 + m, 60))
 
     for hx in (-ESP_HOLE_X / 2, ESP_HOLE_X / 2):   # ESP32-S3, thorax front
         for hy in (-ESP_HOLE_Y / 2, ESP_HOLE_Y / 2):
-            cuts += Pos(45.0 + hx, hy, 0) * Cylinder(ESP_SCREW_D / 2, 60)
+            add(Pos(45.0 + hx, hy, 0) * Cylinder(ESP_SCREW_D / 2 + m, 60))
 
     for bx in BATT_STRAP_X:                  # battery straps, two local pairs
         for sy in (-1, 1):
-            cuts += Pos(bx, sy * BATT_STRAP_Y, 0) * Box(
-                BATT_SLOT_W, BATT_SLOT_L, 60)
+            add(Pos(bx, sy * BATT_STRAP_Y, 0) * Box(
+                BATT_SLOT_W + 2 * m, BATT_SLOT_L + 2 * m, 60))
 
     for sy in (-1, 1):                       # neck socket, front edge
-        cuts += Pos(82.0, sy * 8.0, 0) * Cylinder(NECK_SCREW_D / 2, 60)
+        add(Pos(82.0, sy * 8.0, 0) * Cylinder(NECK_SCREW_D / 2 + m, 60))
 
+    if m > 0.0:
+        # Bearing faces. These are not cuts, so they only exist in the keepout:
+        # the dome's wall lands on the plate all the way round its ellipse, and
+        # the neck's foot lands on the front. A void under either would have the
+        # part standing on air.
+        def ellipse(a, b):
+            return Pos(ABDOMEN_CX, 0, 0) * scale(Cylinder(1.0, 60), by=(a, b, 1.0))
+        add(ellipse(ABDOMEN_A + m, ABDOMEN_B + m) -
+            ellipse(ABDOMEN_A - ABDOMEN_WALL - m, ABDOMEN_B - ABDOMEN_WALL - m))
+        add(Pos(82.0 - NECK_FOOT_L / 2, 0, 0) * Box(
+            NECK_FOOT_L + 2 * m, NECK_W + 2 * m, 60))
+    return cuts
+
+
+def _void_candidates(ox, oy):
+    """Triangle vertex lists for one lattice phase, y >= 0 half only."""
+    s, ht = VOID_SIDE, VOID_SIDE * math.sqrt(3.0) / 2.0
+    dx, dy = s + VOID_WEB, ht + VOID_WEB
+    out = []
+    row = 0
+    while (row + 0.5) * dy + oy < 95.0:
+        yc = (row + 0.5) * dy + oy
+        col = -9
+        while col * dx + ox < 115.0:
+            for up in (True, False):
+                xc = col * dx + ox + (0.0 if up else dx / 2.0)
+                g = 1.0 if up else -1.0
+                out.append([(xc - s / 2, yc - g * ht / 3), (xc + s / 2, yc - g * ht / 3),
+                            (xc, yc + g * 2 * ht / 3)])
+            col += 1
+        row += 1
+    return out
+
+
+_VOID_CACHE = {}
+
+
+def _lightening_voids(report=False):
+    """Triangular lattice over the plate, filtered down to what actually fits.
+
+    Only the y >= 0 half is proposed and each survivor is mirrored, so the plate
+    comes out symmetric even though the acceptance test is numerical.
+
+    The lattice's origin is swept, and it matters far more than it sounds like
+    it should: across the 16 phases tried, the number of voids that fit runs
+    from 0 to 10. A plate this crowded leaves only a handful of legal pockets,
+    and whether a triangle lands in one is almost entirely down to phase. There
+    is no picking that by eye, so it is searched.
+
+    Cheap point-in-solid tests throw out the candidates that are simply off the
+    body - four fifths of them - so only the survivors cost a boolean.
+    """
+    key = (VOID_SIDE, VOID_WEB, VOID_RIM, VOID_KEEPOUT)
+    if key in _VOID_CACHE:
+        return _VOID_CACHE[key][0]
+
+    inner = _plate_solid(shrink=VOID_RIM, arms=False)
+    inner_s = inner.solids()[0]
+    keep = _body_cuts(margin=VOID_KEEPOUT)
+    z = BODY_T / 2
+
+    best = (-1.0, None, None)
+    step = (VOID_SIDE + VOID_WEB) / VOID_PHASES
+    for pi in range(VOID_PHASES):
+        for pj in range(VOID_PHASES):
+            ox, oy = pi * step, pj * step
+            fit, area = [], 0.0
+            for pts in _void_candidates(ox, oy):
+                cx = sum(p[0] for p in pts) / 3.0
+                cy = sum(p[1] for p in pts) / 3.0
+                if not inner_s.is_inside(Vector(cx, cy, z)):
+                    continue
+                if not all(inner_s.is_inside(Vector(px, py, z)) for px, py in pts):
+                    continue
+                probe = extrude(Polygon(*leg.ccw(pts), align=None), amount=BODY_T)
+                if (probe - inner).volume > 1.0 or (probe & keep).volume > 1.0:
+                    continue
+                fit.append(pts)
+                area += probe.volume / BODY_T
+            if area > best[0]:
+                best = (area, fit, (ox, oy))
+
+    _area, fit, phase = best
+    out = None
+    for pts in fit:
+        for sy in (1.0, -1.0):
+            cut = Pos(0, 0, -30) * extrude(
+                Polygon(*leg.ccw([(px, sy * py) for px, py in pts]), align=None),
+                amount=60)
+            out = cut if out is None else out + cut
+    _VOID_CACHE[key] = (out, len(fit), _area, phase, fit)
+    if report:
+        print(f"lightening: {2 * len(fit)} voids, {2 * _area / 100:.1f} cm2 of "
+              f"plate removed (lattice phase {phase[0]:.1f}, {phase[1]:.1f} mm)")
+    return out
+
+
+def check_servo_pads(ring=2.5):
+    """Is every coxa servo bolt hole fully ringed by plate?
+
+    A faceted outline with a point at each hip is easy to draw too narrow, and
+    the failure is quiet: the bolt hole opens onto the edge, the render still
+    looks fine, and you find out when the servo has three screws instead of
+    four. Probe all the way round each hole rather than trusting the profile
+    arithmetic.
+    """
+    solid = _plate_solid().solids()[0]
+    bad = []
+    for hx, hy, yaw in _hips():
+        base = Pos(hx, hy, 0) * Rot(0, 0, yaw + 180)
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                c = (base * Pos(leg.SERVO_SHAFT_OFF + sx * leg.SERVO_HOLE_PITCH_L / 2,
+                                sy * leg.SERVO_HOLE_PITCH_W / 2, BODY_T / 2)).position
+                r = leg.SERVO_HOLE_D / 2 + ring
+                for k in range(8):
+                    a = math.pi * k / 4
+                    p = Vector(c.X + r * math.cos(a), c.Y + r * math.sin(a), c.Z)
+                    if not solid.is_inside(p):
+                        bad.append((hx, hy, sx, sy))
+                        break
+    return bad
+
+
+def check_voids_cut(body):
+    """Is there still material where each lightening void should be?
+
+    The voids are built, filtered and subtracted without anyone ever looking at
+    the result, so a void that silently fails to cut - a flipped winding puts
+    the prism below the plate - leaves a heavier part that renders perfectly.
+    Probe for it instead.
+    """
+    solid = body.solids()[0]
+    missed = 0
+    for pts in _VOID_CACHE.get((VOID_SIDE, VOID_WEB, VOID_RIM, VOID_KEEPOUT),
+                               (None, None, None, None, []))[4]:
+        for sy in (1.0, -1.0):
+            cx = sum(p[0] for p in pts) / 3.0
+            cy = sy * sum(p[1] for p in pts) / 3.0
+            if solid.is_inside(Vector(cx, cy, BODY_T / 2)):
+                missed += 1
+    return missed
+
+
+def make_body():
+    """Body plate: six coxa mounts, electronics, battery, neck socket."""
+    part = _plate_solid()
+    voids = _lightening_voids()
+    cuts = _body_cuts()
+    if voids is not None:
+        cuts += voids
     return part - cuts
 
 
@@ -459,7 +685,21 @@ def main():
     ap.add_argument("--check", action="store_true", help="build and verify, no export")
     args = ap.parse_args()
 
+    _lightening_voids(report=True)
+    bad = check_servo_pads()
+    if bad:
+        print(f"ERROR: {len(bad)} coxa bolt hole(s) break out of the plate edge - "
+              f"widen ARM_HALF or BODY_PROFILE")
+        for hx, hy, sx, sy in bad:
+            print(f"  hip ({hx:.0f}, {hy:.0f}) hole ({sx:+d}, {sy:+d})")
+    else:
+        print("all 24 coxa bolt holes ringed by plate")
+
     body, head, abdomen = make_body(), make_head(), make_abdomen()
+    missed = check_voids_cut(body)
+    if missed:
+        print(f"ERROR: {missed} lightening void(s) did not cut - material is still "
+              f"there. Check polygon winding.")
     for name, p in (("body", body), ("abdomen", abdomen), ("head", head)):
         bb = p.bounding_box()
         print(f"{name:6s} {bb.size.X:5.0f} x {bb.size.Y:5.0f} x {bb.size.Z:5.0f} mm   "
