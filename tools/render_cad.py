@@ -56,11 +56,14 @@ def basis(forward, up):
     f = np.array(forward, dtype=np.float64)
     f /= np.linalg.norm(f)
     u = np.array(up, dtype=np.float64)
-    r = np.cross(u, f)
+    # right = forward x up, NOT up x forward. The latter gives a LEFT-handed
+    # screen frame and silently mirrors every view - the abdomen at x=-74 drew
+    # on the right-hand side of a view labelled "X right".
+    r = np.cross(f, u)
     if np.linalg.norm(r) < 1e-9:
-        r = np.cross(np.array([1.0, 0.0, 0.0]), f)
+        r = np.cross(f, np.array([1.0, 0.0, 0.0]))
     r /= np.linalg.norm(r)
-    u = np.cross(f, r)
+    u = np.cross(r, f)
     u /= np.linalg.norm(u)
     return r, u, f
 

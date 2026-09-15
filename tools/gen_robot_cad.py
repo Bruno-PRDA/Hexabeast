@@ -25,8 +25,8 @@ import math
 import os
 import sys
 
-from build123d import (Align, Axis, Box, Cylinder, Pos, Rot, export_step,
-                       export_stl, fillet)
+from build123d import (Align, Axis, Box, Cylinder, Pos, Rot, Sphere, export_step,
+                       export_stl, fillet, scale)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "ros2_ws", "src", "hexapod_gait"))
@@ -66,6 +66,19 @@ ESP_HOLE_X, ESP_HOLE_Y = 40.0, 20.0     # VERIFY - Freenove and XIAO differ
 ESP_SCREW_D = 2.4
 BATT_SLOT_W, BATT_SLOT_L, BATT_SLOT_SEP = 4.0, 26.0, 70.0
 BATT_X = -78.0                          # strap slots under the abdomen
+
+# --- Abdomen dome ------------------------------------------------------------
+# A shell over the rear of the body, housing the battery. Built as spheres on
+# the same spine lobes as the plate, squashed in Z - so the dome follows the
+# body's outline by construction rather than being a separate shape that has to
+# be kept in sync with it.
+ABDOMEN_CX = -74.0       # centre of the ovoid
+ABDOMEN_A = 45.0         # semi-axis along the body
+ABDOMEN_B = 40.0         # semi-axis across it - the rear hips are at y=55, so
+                         # this leaves 15 mm for the rear legs to sweep past
+ABDOMEN_H = 38.0         # height above the plate
+ABDOMEN_WALL = 2.5
+ABDOMEN_BOLT_D = 3.4
 
 # --- Head --------------------------------------------------------------------
 # Height is set by the KNEES, not the body. A front leg's knee rises to 80 mm
@@ -186,6 +199,53 @@ def make_body():
     return part - cuts
 
 
+def _ellipsoid(a, b, c, cx):
+    """Ellipsoid with semi-axes (a, b, c), centred at (cx, 0, 0)."""
+    return Pos(cx, 0, 0) * scale(Sphere(1.0), by=(a, b, c))
+
+
+def make_abdomen():
+    """Domed battery shell, open underneath, bolting down to the plate.
+
+    One ellipsoid, not a union of lobes. The first attempt followed the plate's
+    spine lobes with ten overlapping spheres; OpenCASCADE fused them into four
+    disjoint solids rather than one, and clipping to z >= 0 then silently
+    dropped the front half. A spider's abdomen is a smooth ovoid regardless, so
+    the single primitive is both more robust and more accurate.
+    """
+    outer = _ellipsoid(ABDOMEN_A, ABDOMEN_B, ABDOMEN_H, ABDOMEN_CX)
+    outer = outer & (Pos(0, 0, 400) * Box(1200, 1200, 800))     # keep z >= 0
+
+    # The inner shell is NOT clipped. Two solids trimmed at exactly z = 0 share
+    # a coincident planar face, and the boolean returns an empty solid; letting
+    # this one run below zero avoids that and opens the underside, which is what
+    # a battery shell wants anyway.
+    inner = _ellipsoid(ABDOMEN_A - ABDOMEN_WALL, ABDOMEN_B - ABDOMEN_WALL,
+                       ABDOMEN_H - ABDOMEN_WALL, ABDOMEN_CX)
+    part = outer - inner
+
+    cuts = None
+
+    def add(c):
+        nonlocal cuts
+        cuts = c if cuts is None else cuts + c
+
+    # Bolts down into the plate, fore and aft on the centre-line flanks.
+    for bx in (ABDOMEN_CX + ABDOMEN_A * 0.45, ABDOMEN_CX - ABDOMEN_A * 0.45):
+        for sy in (-1, 1):
+            add(Pos(bx, sy * ABDOMEN_B * 0.62, 0) * Cylinder(ABDOMEN_BOLT_D / 2, 60))
+
+    # Cable pass-through at the front, so the battery leads reach the drivers.
+    add(Pos(ABDOMEN_CX + ABDOMEN_A, 0, 10.0) * Box(20, 24, 16))
+
+    # Vents - the UBECs live under here and they get warm.
+    for i in range(5):
+        add(Pos(ABDOMEN_CX + 26.0 - i * 13.0, 0, ABDOMEN_H * 0.62) *
+            Box(4.5, 44, 44))
+
+    return part - cuts
+
+
 def make_head():
     """Neck plus the face: LCD, proximity sensor and camera on one part.
 
@@ -230,6 +290,89 @@ def make_head():
     return part - foot_cuts
 
 
+# --- Electrical components ---------------------------------------------------
+# Solids representing what actually gets bolted on, so the assembly shows
+# whether it all physically fits rather than only where the brackets are.
+# Dimensions are millimetres (length, width, height); see docs/bom.md.
+#
+#   name                L      W      H     where
+COMPONENTS = {
+    "pca9685":       (62.5, 25.4, 16.0),
+    "esp32s3cam":    (45.0, 27.0, 20.0),
+    "lipo2s":        (105.0, 34.0, 20.0),   # 2200 mAh class - see fit note
+    "oled13":        (35.5, 33.5, 5.0),
+    "vl53l0x":       (25.0, 11.0, 3.5),
+    "mpu6050":       (21.2, 15.6, 3.5),
+    "pcf8574":       (36.0, 25.0, 14.0),
+    "ina219":        (26.0, 20.0, 5.0),
+    "ubec":          (44.0, 21.0, 11.0),
+}
+
+
+def _block(name, loc):
+    """One component as a placed box, origin at its centre."""
+    l, w, h = COMPONENTS[name]
+    return loc * Box(l, w, h)
+
+
+def make_electronics():
+    """Every electrical part, positioned in the body frame.
+
+    Returns [(label, solid)]. The servos matter most: eighteen 40.7 x 20 x 46.5
+    blocks are over half the robot's mass and most of its packaging problem, and
+    until they are drawn it is easy to believe there is room for things there
+    is not.
+    """
+    out = []
+    sl, sw, sh = leg.SERVO_BODY_L, leg.SERVO_W, leg.SERVO_H
+    # Servo body relative to its own shaft: shaft on the top face, offset along
+    # the length, body hanging below.
+    body = Pos(leg.SERVO_SHAFT_OFF, 0, -sh / 2) * Box(sl, sw, sh)
+
+    a = stance_angles()
+    for i, (hx, hy, yaw) in enumerate(_hips()):
+        name = cfg.LEGS[i][0]
+        # Coxa servo: shaft up through the plate, body hanging into the
+        # ground clearance, pointing inward.
+        out.append((f"{name}_coxa_servo",
+                    Pos(hx, hy, BODY_T) * Rot(0, 0, yaw + 180) * body))
+        cl, fl, kl = leg_transforms(hx, hy, yaw, a, BODY_T)
+        out.append((f"{name}_femur_servo", fl * body))
+        out.append((f"{name}_knee_servo", kl * body))
+
+    # Servo drivers, across the thorax - see the note in make_body(). Spaced so
+    # the 25.4 mm boards clear each other.
+    out.append(("pca9685_A", _block("pca9685", Pos(12.0, 0, BODY_T + 8.0) * Rot(0, 0, 90))))
+    out.append(("pca9685_B", _block("pca9685", Pos(-16.0, 0, BODY_T + 8.0) * Rot(0, 0, 90))))
+
+    # The small I2C boards go UNDER the plate. There is 59 mm of ground
+    # clearance and the coxa servos hang down in a ring at radius 70-93, so the
+    # middle of the underside is empty. The IMU wants to be at the body centre
+    # anyway - that is where its readings mean what the model thinks they mean -
+    # and the foot-switch expander wants to be where the leg wiring arrives.
+    out.append(("mpu6050", _block("mpu6050", Pos(0.0, 0.0, -4.0))))
+    out.append(("pcf8574", _block("pcf8574", Pos(-26.0, 0.0, -10.0))))
+
+    # Power, inside the abdomen dome, with the shunt next to the pack.
+    out.append(("lipo2s", _block("lipo2s", Pos(ABDOMEN_CX, 0, BODY_T + 10.0))))
+    for sy in (-1, 1):
+        out.append((f"ubec_{'L' if sy > 0 else 'R'}",
+                    _block("ubec", Pos(ABDOMEN_CX + 4.0, sy * 30.0, BODY_T + 6.0))))
+    out.append(("ina219", _block("ina219", Pos(ABDOMEN_CX - 32.0, 0, BODY_T + 4.0))))
+
+    # On the head. The ESP32-S3 CAM board carries the camera itself, so it goes
+    # in the turret rather than on the thorax - the lens cannot be anywhere else.
+    head_x = 82.0 - NECK_FOOT_L + NECK_T
+    head_face = Rot(0, 90 + HEAD_TILT, 0)
+    out.append(("esp32s3cam", _block("esp32s3cam",
+                Pos(head_x - 14.0, 0, BODY_T + NECK_H + HEAD_H / 2 + CAM_RISE) * head_face)))
+    out.append(("oled13", _block("oled13",
+                Pos(head_x - 6.5, 0, BODY_T + NECK_H + LCD_Z) * head_face)))
+    out.append(("vl53l0x", _block("vl53l0x",
+                Pos(head_x - 5.5, 0, BODY_T + NECK_H + PROX_Z) * head_face)))
+    return out
+
+
 # --- assembly ----------------------------------------------------------------
 
 def stance_angles():
@@ -266,9 +409,12 @@ def knee_peak():
     return peak
 
 
-def make_assembly():
+def make_assembly(electronics=True):
     parts = [("body", make_body()),
+             ("abdomen", make_abdomen()),
              ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
+    if electronics:
+        parts += make_electronics()
     a = stance_angles()
     coxa_p, femur_p, tibia_p = (leg.make_coxa_link(), leg.make_femur_link(),
                                 leg.make_tibia())
@@ -284,8 +430,8 @@ def main():
     ap.add_argument("--check", action="store_true", help="build and verify, no export")
     args = ap.parse_args()
 
-    body, head = make_body(), make_head()
-    for name, p in (("body", body), ("head", head)):
+    body, head, abdomen = make_body(), make_head(), make_abdomen()
+    for name, p in (("body", body), ("abdomen", abdomen), ("head", head)):
         bb = p.bounding_box()
         print(f"{name:6s} {bb.size.X:5.0f} x {bb.size.Y:5.0f} x {bb.size.Z:5.0f} mm   "
               f"{p.volume/1000:6.1f} cm3   ~{p.volume/1000*1.24*0.46:5.1f} g")
@@ -317,16 +463,46 @@ def main():
           f"   {'OK' if cam - knee > 15 else 'TOO LOW'}")
     print(f"LCD face {lcd:.0f} mm, proximity sensor {BODY_T+NECK_H+PROX_Z:.0f} mm")
 
+    # Does any component intersect another, or the structure it mounts to?
+    # A rendered assembly hides this completely - overlapping solids just look
+    # like one solid.
+    print("\ncomponent interference")
+    comps = make_electronics()
+    structure = [("body", body), ("abdomen", abdomen),
+                 ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
+    clashes = 0
+    for i, (na, pa) in enumerate(comps):
+        for nb, pb in structure + comps[i + 1:]:
+            try:
+                ov = (pa & pb).volume
+            except Exception:
+                continue
+            if ov > 60.0:                 # ignore slivers; 60 mm3 is a 4 mm cube
+                print(f"  {na} <-> {nb}: {ov/1000:.2f} cm3")
+                clashes += 1
+    print(f"  {clashes} interference(s) over 0.06 cm3"
+          if clashes else "  none over 0.06 cm3")
+
+    total = sum(p.volume for _n, p in comps if 'servo' not in _n)
+    print(f"\nboards and battery occupy {total/1000:.0f} cm3; "
+          f"abdomen cavity holds {(4/3)*math.pi*(ABDOMEN_A-ABDOMEN_WALL)*(ABDOMEN_B-ABDOMEN_WALL)*(ABDOMEN_H-ABDOMEN_WALL)/2/1000:.0f} cm3")
+
     if not args.check:
         os.makedirs(OUT, exist_ok=True)
         export_step(body, os.path.join(OUT, "body.step"))
         export_stl(body, os.path.join(OUT, "body.stl"))
         export_step(head, os.path.join(OUT, "head.step"))
         export_stl(head, os.path.join(OUT, "head.stl"))
+        export_step(abdomen, os.path.join(OUT, "abdomen.step"))
+        export_stl(abdomen, os.path.join(OUT, "abdomen.stl"))
         asm = None
         for _n, p in make_assembly():
             asm = p if asm is None else asm + p
         export_stl(asm, os.path.join(OUT, "assembly.stl"))
+        struct = None
+        for _n, p in make_assembly(electronics=False):
+            struct = p if struct is None else struct + p
+        export_stl(struct, os.path.join(OUT, "assembly_printed_only.stl"))
         print(f"\nwritten to {os.path.relpath(OUT, ROOT)}")
     return 0
 
