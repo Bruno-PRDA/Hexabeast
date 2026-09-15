@@ -93,6 +93,28 @@ ARM_JOINTS = [
 ]
 ARM_JOINT_NAMES = [j[0] for j in ARM_JOINTS] if ARM else []
 
-# PCA9685 channel per joint, same order: left legs on the board at 0x40
-# (channels 0-15), right legs on the board at 0x41 (16-31).
+# --- Hardware wiring (firmware only; the URDF uses proper joint axes) ---------
+# PCA9685 channel per joint, in JOINT_NAMES order: left legs on the board at
+# 0x40 (channels 0-15), right legs on the board at 0x41 (16-31).
 SERVO_CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+
+# Which way a servo turns for a positive joint angle. The left and right legs
+# are mirror images, so a horn that advances the joint on one side retards it
+# on the other. These are the mirror assumption, NOT measured - the calibration
+# mode in the firmware flips and saves them per joint. Treat as a starting
+# guess and verify on the bench before the legs are attached to anything.
+SERVO_DIR = [
+    +1, -1, -1,   # FL coxa, femur, tibia
+    +1, -1, -1,   # ML
+    +1, -1, -1,   # RL
+    +1, +1, +1,   # FR
+    +1, +1, +1,   # MR
+    +1, +1, +1,   # RR
+]
+
+# Pulse width bounds for a DT996. 500-2500 us spans its ~180 deg; centre is
+# nominally 1500 us but every servo differs, which is what per-joint trim fixes.
+SERVO_MIN_US = 500
+SERVO_MAX_US = 2500
+SERVO_CENTER_US = 1500
+SERVO_RANGE_DEG = 180.0    # travel between MIN_US and MAX_US

@@ -31,3 +31,10 @@ ros2_ws/log/
 *.SLDDRW.bak
 swxJRNL.*
 Backup/
+
+# PlatformIO / firmware build output
+firmware/.pio/
+firmware/test/*.exe
+firmware/test/*.obj
+firmware/test/*.pdb
+firmware/test/test_kinematics
