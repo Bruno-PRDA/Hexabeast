@@ -60,12 +60,28 @@ BODY_LOBES = [
 ]
 
 # --- Electronics footprints --------------------------------------------------
-PCA_HOLE_X, PCA_HOLE_Y = 57.2, 20.3     # PCA9685 breakout, 62.5 x 25.4 board
+PCA_HOLE_X, PCA_HOLE_Y = 55.88, 19.05  # 2.2 x 0.75 inch - the board is imperial
 PCA_SCREW_D = 2.8
 ESP_HOLE_X, ESP_HOLE_Y = 40.0, 20.0     # VERIFY - Freenove and XIAO differ
 ESP_SCREW_D = 2.4
-BATT_SLOT_W, BATT_SLOT_L, BATT_SLOT_SEP = 4.0, 26.0, 70.0
-BATT_X = -78.0                          # strap slots under the abdomen
+# BATTERY. The pack hangs UNDER the plate, not inside the abdomen dome. A 2S
+# pack is 90 x 34 x 20 mm and the dome's cavity is 85 x 75 at plate level, but
+# the ellipsoid tapers to 70 mm long at the pack's 20 mm top face, so the front
+# and rear top corners fall outside the shell in every orientation. Forcing it
+# would need ABDOMEN_A ~60 and ABDOMEN_H ~50, putting the dome front at x=-14 -
+# through the waist, over the rear driver, and into the 15 mm the rear legs need
+# to sweep past. The dome's job is the UBECs. Underslung the pack fits with real
+# margin and sits 16 mm further forward, which helps the centre of gravity.
+#
+# Packs have NO mounting holes - none, in any brand - so retention is straps.
+# Each strap gets its own LOCAL pair of slots rather than one pair at each end:
+# slots 70 mm apart would run the strap's top length straight across the dome
+# floor, where the UBECs and dome bolts live.
+BATT_X = -62.0                          # pack centre, spans x -17 to -107
+BATT_Z = -10.0                          # centre, i.e. 0 to -20 below the plate
+BATT_STRAP_X = (-28.0, -100.0)          # strap stations
+BATT_STRAP_Y = 21.0                     # just outside the 34 mm pack
+BATT_SLOT_W, BATT_SLOT_L = 20.0, 4.0    # strap width along X, thickness along Y
 
 # --- Abdomen dome ------------------------------------------------------------
 # A shell over the rear of the body, housing the battery. Built as spheres on
@@ -189,9 +205,10 @@ def make_body():
         for hy in (-ESP_HOLE_Y / 2, ESP_HOLE_Y / 2):
             cuts += Pos(45.0 + hx, hy, 0) * Cylinder(ESP_SCREW_D / 2, 60)
 
-    for sx in (-1, 1):                       # battery straps, under the abdomen
-        cuts += Pos(BATT_X + sx * BATT_SLOT_SEP / 2, 0, 0) * Box(
-            BATT_SLOT_W, BATT_SLOT_L, 60)
+    for bx in BATT_STRAP_X:                  # battery straps, two local pairs
+        for sy in (-1, 1):
+            cuts += Pos(bx, sy * BATT_STRAP_Y, 0) * Box(
+                BATT_SLOT_W, BATT_SLOT_L, 60)
 
     for sy in (-1, 1):                       # neck socket, front edge
         cuts += Pos(82.0, sy * 8.0, 0) * Cylinder(NECK_SCREW_D / 2, 60)
@@ -233,7 +250,7 @@ def make_abdomen():
     # Bolts down into the plate, fore and aft on the centre-line flanks.
     for bx in (ABDOMEN_CX + ABDOMEN_A * 0.45, ABDOMEN_CX - ABDOMEN_A * 0.45):
         for sy in (-1, 1):
-            add(Pos(bx, sy * ABDOMEN_B * 0.62, 0) * Cylinder(ABDOMEN_BOLT_D / 2, 60))
+            add(Pos(bx, sy * ABDOMEN_B * 0.70, 0) * Cylinder(ABDOMEN_BOLT_D / 2, 60))
 
     # Cable pass-through at the front, so the battery leads reach the drivers.
     add(Pos(ABDOMEN_CX + ABDOMEN_A, 0, 10.0) * Box(20, 24, 16))
@@ -297,15 +314,15 @@ def make_head():
 #
 #   name                L      W      H     where
 COMPONENTS = {
-    "pca9685":       (62.5, 25.4, 16.0),
+    "pca9685":       (62.23, 25.4, 10.1),
     "esp32s3cam":    (45.0, 27.0, 20.0),
-    "lipo2s":        (105.0, 34.0, 20.0),   # 2200 mAh class - see fit note
+    "lipo2s":        (90.0, 34.0, 20.0),    # 2200 mAh class - see BATTERY note
     "oled13":        (35.5, 33.5, 5.0),
     "vl53l0x":       (25.0, 11.0, 3.5),
     "mpu6050":       (21.2, 15.6, 3.5),
-    "pcf8574":       (36.0, 25.0, 14.0),
-    "ina219":        (26.0, 20.0, 5.0),
-    "ubec":          (44.0, 21.0, 11.0),
+    "pcf8574":       (47.63, 15.24, 15.0),
+    "ina219":        (25.4, 20.32, 10.0),
+    "ubec":          (43.1, 32.3, 12.5),
 }
 
 
@@ -350,26 +367,38 @@ def make_electronics():
     # middle of the underside is empty. The IMU wants to be at the body centre
     # anyway - that is where its readings mean what the model thinks they mean -
     # and the foot-switch expander wants to be where the leg wiring arrives.
-    out.append(("mpu6050", _block("mpu6050", Pos(0.0, 0.0, -4.0))))
-    out.append(("pcf8574", _block("pcf8574", Pos(-26.0, 0.0, -10.0))))
+    # The IMU goes at the body centre - that is where its readings mean what the
+    # model assumes - and the battery now occupies x -107..-17, so x=0 is the
+    # one place under the plate that is both central and free.
+    out.append(("mpu6050", _block("mpu6050", Pos(0.0, 0.0, -3.0))))
+    # The expander moves off the battery and out to the side, still under the
+    # plate, where the leg wiring arrives.
+    out.append(("pcf8574", _block("pcf8574", Pos(12.0, -30.0, -9.0))))
 
     # Power, inside the abdomen dome, with the shunt next to the pack.
-    out.append(("lipo2s", _block("lipo2s", Pos(ABDOMEN_CX, 0, BODY_T + 10.0))))
+    out.append(("lipo2s", _block("lipo2s", Pos(BATT_X, 0, BATT_Z))))
+    # Both UBECs side by side in the dome. At 43.1 x 32.3 they are the largest
+    # things in there; the ellipsoid is 70 mm wide at their 12.5 mm top face, so
+    # +-17 mm centres is what clears the wall.
     for sy in (-1, 1):
         out.append((f"ubec_{'L' if sy > 0 else 'R'}",
-                    _block("ubec", Pos(ABDOMEN_CX + 4.0, sy * 30.0, BODY_T + 6.0))))
-    out.append(("ina219", _block("ina219", Pos(ABDOMEN_CX - 32.0, 0, BODY_T + 4.0))))
+                    _block("ubec", Pos(ABDOMEN_CX, sy * 16.5, BODY_T + 6.5))))
+    # The shunt does NOT go in the dome: the two UBECs take 43 of its 85 mm of
+    # inner length, and anywhere else in there either fouls them or runs out
+    # through the ellipsoid's taper. Under the plate beside the IMU instead,
+    # close enough to the pack's forward leads to keep the sense wiring short.
+    out.append(("ina219", _block("ina219", Pos(0.0, 26.0, -6.0))))
 
     # On the head. The ESP32-S3 CAM board carries the camera itself, so it goes
     # in the turret rather than on the thorax - the lens cannot be anywhere else.
     head_x = 82.0 - NECK_FOOT_L + NECK_T
     head_face = Rot(0, 90 + HEAD_TILT, 0)
     out.append(("esp32s3cam", _block("esp32s3cam",
-                Pos(head_x - 14.0, 0, BODY_T + NECK_H + HEAD_H / 2 + CAM_RISE) * head_face)))
+                Pos(head_x - 16.0, 0, BODY_T + NECK_H + HEAD_H / 2 + CAM_RISE) * head_face)))
     out.append(("oled13", _block("oled13",
-                Pos(head_x - 6.5, 0, BODY_T + NECK_H + LCD_Z) * head_face)))
+                Pos(head_x - 8.5, 0, BODY_T + NECK_H + LCD_Z) * head_face)))
     out.append(("vl53l0x", _block("vl53l0x",
-                Pos(head_x - 5.5, 0, BODY_T + NECK_H + PROX_Z) * head_face)))
+                Pos(head_x - 11.0, 0, BODY_T + NECK_H + PROX_Z) * head_face)))
     return out
 
 
@@ -411,7 +440,7 @@ def knee_peak():
 
 def make_assembly(electronics=True):
     parts = [("body", make_body()),
-             ("abdomen", make_abdomen()),
+             ("abdomen", Pos(0, 0, BODY_T) * make_abdomen()),
              ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
     if electronics:
         parts += make_electronics()
@@ -468,7 +497,7 @@ def main():
     # like one solid.
     print("\ncomponent interference")
     comps = make_electronics()
-    structure = [("body", body), ("abdomen", abdomen),
+    structure = [("body", body), ("abdomen", Pos(0, 0, BODY_T) * abdomen),
                  ("head", Pos(82.0 - NECK_FOOT_L + NECK_T, 0, BODY_T) * make_head())]
     clashes = 0
     for i, (na, pa) in enumerate(comps):
@@ -483,9 +512,13 @@ def main():
     print(f"  {clashes} interference(s) over 0.06 cm3"
           if clashes else "  none over 0.06 cm3")
 
-    total = sum(p.volume for _n, p in comps if 'servo' not in _n)
-    print(f"\nboards and battery occupy {total/1000:.0f} cm3; "
-          f"abdomen cavity holds {(4/3)*math.pi*(ABDOMEN_A-ABDOMEN_WALL)*(ABDOMEN_B-ABDOMEN_WALL)*(ABDOMEN_H-ABDOMEN_WALL)/2/1000:.0f} cm3")
+    in_dome = sum(p.volume for n, p in comps if n.startswith('ubec'))
+    cavity = ((4/3) * math.pi * (ABDOMEN_A - ABDOMEN_WALL) *
+              (ABDOMEN_B - ABDOMEN_WALL) * (ABDOMEN_H - ABDOMEN_WALL) / 2)
+    print(f"\nin the dome: {in_dome/1000:.0f} cm3 of UBEC in a "
+          f"{cavity/1000:.0f} cm3 cavity")
+    print(f"under the plate: 90 x 34 x 20 pack centred at x={BATT_X:.0f}, "
+          f"{59 - 20 - 2:.0f} mm still clear beneath it")
 
     if not args.check:
         os.makedirs(OUT, exist_ok=True)

@@ -55,7 +55,7 @@ Assign I2C to any two free GPIO in firmware; the S3's GPIO matrix is flexible.
 
 | # | Part | Qty | ~EUR | Why |
 |---|------|-----|------|-----|
-| 4.1 | LiPo 2S 7.4 V, 5000 mAh, 25C+, XT60 | 1 | 25-35 | 25C on 5 Ah is 125 A available, far past any peak here. ~30-45 min of walking |
+| 4.1 | LiPo 2S 7.4 V, **2200 mAh**, 25C+, XT60 | 1 | 15-22 | Sized by the robot, not the runtime: a 2200 pack is ~90 x 34 x 20 mm and slings under the plate between the rear coxa servos, which leave only ~8 mm either side. A 5000 pack is 132 x 43 and will not pass. Vendor spread is large - 1500 mAh packs alone range 69-107 mm long - so measure yours before cutting straps |
 | 4.2 | UBEC / switching BEC, **6 V 10 A** | 2 | 16-24 | One per PCA9685. Do **not** feed 7.4 V to these servos - they are 6 V parts |
 | 4.3 | Buck converter, 5 V 3 A (MP1584 or similar) | 1 | 5 | Separate logic rail for the ESP32 and camera |
 | 4.4 | Electrolytic capacitor, 1000-2200 uF, 16 V | 2 | 3 | One across V+/GND at each PCA9685 |
