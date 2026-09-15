@@ -32,9 +32,15 @@ ros2_ws/src/
                          test world, launch files
   hexapod_gait/          Python: robot_config (single source of truth), leg_ik, gait
                          (pure functions, later ported to the ESP32), gait_node (ROS 2)
+firmware/              ESP32-S3: servos, calibration, gait. See firmware/README.md
 tools/
   gen_urdf.py            regenerates description + controller config; --check verifies
                          the URDF joint chain against the IK, no ROS needed
+  gen_firmware_header.py robot_config.py -> firmware/include/robot_geometry.h
+  test_firmware.py       compiles the firmware kinematics and checks them against
+                         the Python reference; needs only `pip install ziglang`
+  measure_cad.py         volumes, masses and joint axes from STL/STEP exports
+  render_cad.py          draws the exported STLs from four angles
   check_ik.py            IK round-trip and joint-travel report (servo centre table)
 docs/
   wsl-ros2-setup.md      installing WSL2 + ROS 2 Jazzy + Gazebo Harmonic, running the sim
@@ -73,10 +79,12 @@ The servo model comes with the physics engine.
       Packages written; need WSL to build and verify.
 - [ ] **Phase 3 - SolidWorks.** Model the robot, export with sw2urdf, drop the
       body half into `hexapod_description`. Real masses and inertias.
-- [ ] **Phase 4 - ESP32 firmware and FPV.** Gait on the board, servos over
-      two PCA9685s, MJPEG stream and a WebSocket taking the same `/cmd_vel`
-      the sim's gait node takes - one brain, sim and real robot. The phone
-      opens `192.168.4.1`; no app.
+- [~] **Phase 4 - ESP32 firmware and FPV.** Servos over two PCA9685s, bench
+      calibration and the gait loop are written, with the kinematics checked
+      against the Python reference (2615 checks, 0 failures). Still to come:
+      MJPEG stream and a WebSocket taking the same command the sim's gait node
+      takes - one brain, sim and real robot. The phone opens `192.168.4.1`;
+      no app. See [firmware/README.md](firmware/README.md).
 - [ ] **Phase 5 - the real robot.** Calibrate per `docs/hardware.md`, stand,
       walk, then close the loop on the IMU and the foot switches.
 
